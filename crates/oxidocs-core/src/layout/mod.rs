@@ -15077,7 +15077,32 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                     if cursor.cursor_y <= start_y + 0.1 {
                         img_before = image_section_top_spacing;
                     }
-                    if cursor.cursor_y + img_before + img_adv > start_y + content_height {
+                    // S1418b (2026-09-23, opt-out OXI_IMAGE_INK_FIT_DISABLE):
+                    // an inline image line is PLACED on the grid-rounded advance
+                    // (S1418) but is judged against the page bottom by its own
+                    // INK, not by that rounded advance. MEASURED on a faithful
+                    // one-image slice of policies__1db396de (453.5x218.0pt on an
+                    // 18pt grid, body bottom 771.0): sweeping a snapToGrid=0
+                    // exact spacer 455..495pt in 2pt steps, Word keeps the image
+                    // on page 1 up to spacer 473 -- where it draws at
+                    // 551.34..769.90, i.e. ink bottom 769.90 <= 771.0 -- and
+                    // moves it at 475. The rounded advance would put 473 at
+                    // 543.9 + 234.0 = 777.9 > 771.0 and move it a page early,
+                    // which is exactly what Oxi did: Word fits three of the five
+                    // figures on its page 29, Oxi only two, and the whole tail
+                    // of the document shifted by one page.
+                    // The grid leading around the image splits evenly: on the
+                    // 18pt grid above, advance 234.0 holds a 218.56 image drawn
+                    // at 7.44 below the line top and ending 226.0 below it, and
+                    // (234.0 + 218.56) / 2 = 226.28 reproduces that. Judging by
+                    // the bare ink (218) instead is 8pt too generous and let
+                    // tokyoshugyo pull three paragraphs onto page 74.
+                    let img_fit = if std::env::var_os("OXI_IMAGE_INK_FIT_DISABLE").is_none() {
+                        img_adv - (img_adv - img_line).max(0.0) * 0.5
+                    } else {
+                        img_adv
+                    };
+                    if cursor.cursor_y + img_before + img_fit > start_y + content_height {
                         img_before = image_section_top_spacing;
                         if num_columns > 1 && current_column + 1 < num_columns {
                             current_column += 1;
