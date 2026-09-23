@@ -532,6 +532,7 @@ impl OoxmlParser {
         // S755: doc-level even/odd header flag (settings.xml).
         let even_odd_hf = self.parse_even_odd_headers();
         let s1014 = std::env::var("OXI_S1014_DISABLE").is_err();
+        let s1014_footer = std::env::var_os("OXI_S1014F_DISABLE").is_none();
         for mut section in sections {
             // S1014 Stage A (2026-07-26): per-type HEADER inheritance. Word
             // inherits default/first/even SEPARATELY — a section that declares
@@ -561,11 +562,32 @@ impl OoxmlParser {
                 section.properties.header_refs.clone()
             };
             let effective_header_refs = &merged_header_refs;
-            let effective_footer_refs = if section.properties.footer_refs.is_empty() {
-                &prev_footer_refs
+            // S1014 Stage B (2026-09-23): per-type FOOTER inheritance, the
+            // sibling Stage A deferred. Word inherits default/first/even
+            // separately for footers too. legal__003ac6a4 section 3 declares
+            // ONLY `type="first"` and is NOT titlePg, so the all-or-nothing
+            // rule left its 886 body paragraphs with NO footer at all: the
+            // body ran to 664.9 where Word stops at 630.2 (pgMar bottom 177.1
+            // + the inherited 3-paragraph footer's 33.7 stack), over-packing
+            // every page and closing 78 pages into 73. The footer geometry was
+            // already right -- `[FTR] footer_h=33.7 reserved=210.8` -- it was
+            // simply never reached for that section. Opt-out OXI_S1014F_DISABLE.
+            let merged_footer_refs: Vec<HdrFtrRef> = if s1014_footer {
+                let mut out = prev_footer_refs.clone();
+                for r in &section.properties.footer_refs {
+                    if let Some(slot) = out.iter_mut().find(|p| p.ref_type == r.ref_type) {
+                        *slot = r.clone();
+                    } else {
+                        out.push(r.clone());
+                    }
+                }
+                out
+            } else if section.properties.footer_refs.is_empty() {
+                prev_footer_refs.clone()
             } else {
-                &section.properties.footer_refs
+                section.properties.footer_refs.clone()
             };
+            let effective_footer_refs = &merged_footer_refs;
             // Determine which header/footer type to use.
             // S755 (2026-07-06): `header`/`footer` always carry the DEFAULT
             // type; the "first" (titlePg) and "even" (evenAndOddHeaders)
@@ -1017,7 +1039,11 @@ impl OoxmlParser {
             } else if !section.properties.header_refs.is_empty() {
                 prev_header_refs = section.properties.header_refs;
             }
-            if !section.properties.footer_refs.is_empty() {
+            if s1014_footer {
+                // Persist the per-type merged set so the next section inherits
+                // each type's last declared-or-inherited value.
+                prev_footer_refs = merged_footer_refs;
+            } else if !section.properties.footer_refs.is_empty() {
                 prev_footer_refs = section.properties.footer_refs;
             }
             page_index += 1;

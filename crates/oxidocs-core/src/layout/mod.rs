@@ -19597,6 +19597,33 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                 return ((dist - s905_line).max(page.margin.bottom), false);
             }
         }
+        // S1014 Stage B sibling (2026-09-23, opt-out OXI_FRAME_FOOTER_DISABLE):
+        // a footer whose paragraphs ALL carry `framePr` is a page-anchored
+        // frame. Word positions it independently and it does not push the body
+        // down at all -- ukframework's footer5 sits at `vAnchor=page y=15761`
+        // (= 788.05pt, where its "March 2022" renders) while the body runs to
+        // 781.99 on every full page = the bottom margin (56.7) alone, not
+        // margin + stack. The per-paragraph `frame_pr` skip below already
+        // handles the paragraphs, but footer5 also holds a TABLE, which that
+        // loop never skips: it reserved footer_h 34.0 -> 69.4, cutting 12.7pt
+        // from every page and adding one. Decide it for the whole footer so
+        // the table goes with its frame, instead of carving out the table.
+        if std::env::var_os("OXI_FRAME_FOOTER_DISABLE").is_none() {
+            let paras: Vec<&Paragraph> = blocks
+                .iter()
+                .filter_map(|b| match b {
+                    Block::Paragraph(p) => Some(p),
+                    _ => None,
+                })
+                .collect();
+            if !paras.is_empty() && paras.iter().all(|p| p.style.frame_pr.is_some()) {
+                if std::env::var("OXI_DBG_FTR").is_ok() {
+                    eprintln!("[FTR-FRAME] all {} paras framed -> reserve bottom margin {:.2} only",
+                        paras.len(), page.margin.bottom);
+                }
+                return (page.margin.bottom, false);
+            }
+        }
         let footer_reserved = if !blocks.is_empty() {
             let footer_dist = page.footer_distance.unwrap_or(36.0);
             let cw = page.size.width - page.margin.left - page.margin.right;
