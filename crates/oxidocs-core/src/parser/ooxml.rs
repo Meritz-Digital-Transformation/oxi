@@ -1832,6 +1832,7 @@ fn parse_body(
 ) -> Result<Vec<ParsedSection>, ParseError> {
     let mut reader = Reader::from_str(xml);
     let mut sections: Vec<ParsedSection> = Vec::new();
+    let mut redundant_break_candidates: Vec<usize> = Vec::new();
     let mut current_blocks = Vec::new();
     let mut current_floating_images: Vec<Image> = Vec::new();
     let mut current_text_boxes: Vec<TextBox> = Vec::new();
@@ -1908,21 +1909,19 @@ fn parse_body(
                         // missing +2.7/figure, not the empty spacers (S1004
                         // falsified those). Ships as the co-gated {S997, S1179}
                         // pair per the S559 discipline.
-                        // S1182: classification (s997/image_only) runs on the
-                        // UNTAGGED images only, so a tagged visual placeholder
-                        // can never flip a paragraph's historical class.
+                        // A visual inline shape occupies an object-only line even
+                        // when no bitmap accompanies it, including a host with
+                        // a single ASCII space.
                         let s1182_is_tagged = |b: &Block| matches!(b, Block::Image(img)
                             if img.alt_text.as_deref() == Some(S1182_SENTINEL));
-                        let n_untagged =
-                            pr.inline_images.iter().filter(|b| !s1182_is_tagged(b)).count();
-                        let s997_single_ascii_space_host = n_untagged == 1
+                        let s997_single_ascii_space_host = pr.inline_images.len() == 1
                             && std::env::var("OXI_S997_DISABLE").is_err()
                             && {
                                 let mut chars =
                                     pr.paragraph.runs.iter().flat_map(|r| r.text.chars());
                                 matches!(chars.next(), Some(' ')) && chars.next().is_none()
                             };
-                        let image_only = n_untagged > 0
+                        let image_only = !pr.inline_images.is_empty()
                             && (pr.paragraph.runs.iter().all(|r| r.text.is_empty())
                                 || s997_single_ascii_space_host)
                             && pr.math_blocks.is_empty()
@@ -2281,6 +2280,12 @@ fn parse_body(
                             current_blocks.extend(pr.inline_images);
                             current_blocks.len().saturating_sub(1)
                         };
+                        // Anchored artwork is content even when its paragraph
+                        // has no text runs. A section boundary must not absorb
+                        // the preceding manual break across that content.
+                        let section_carrier_has_artwork = !pr.floating_images.is_empty()
+                            || !pr.shapes.is_empty()
+                            || !pr.text_boxes.is_empty();
                         // Set anchor_block_index for floating images
                         for mut img in pr.floating_images {
                             img.anchor_block_index = anchor_idx;
@@ -2293,61 +2298,9 @@ fn parse_body(
                         }
                         // If this paragraph contained a section break, start a new section
                         if let Some(sp) = pr.sect_pr {
-                            // S794 (2026-07-12, opt-out OXI_S794_DISABLE): an explicit
-                            // trailing page break IMMEDIATELY before a page-starting
-                            // section boundary is redundant — Word emits ONE boundary
-                            // (ukframework front matter: a para ending with
-                            // <w:br type="page"/> is followed directly by the empty
-                            // sectPr(nextPage) para; Word 7 front pages, Oxi rendered a
-                            // phantom blank = the whole 470-para body cascaded +1).
-                            // STRICT adjacency: the sectPr carrier must be EMPTY and the
-                            // \x0C must be the very last content before it — intervening
-                            // empty paragraphs mean Word DOES render the page (the same
-                            // doc's other transition keeps 3 spacer paras on their page).
-                            if std::env::var("OXI_S794_DISABLE").is_err()
-                                && sp.section_type.as_deref() != Some("continuous")
-                            {
-                                let n = current_blocks.len();
-                                let s_empty = matches!(current_blocks.last(), Some(Block::Paragraph(p))
-                                    if p.runs.iter().all(|r| r.text.trim().is_empty()));
-                                if s_empty && n >= 2 {
-                                    if let Some(Block::Paragraph(x)) = current_blocks.get_mut(n - 2)
-                                    {
-                                        // S794b (2026-07-18): the trailing \x0C often
-                                        // sits in its OWN run after the text runs
-                                        // (reports__000e8acd caption: [Table ][SEQ 1]
-                                        // [ EqIA weighting…][<w:r><w:br type=page/>]) —
-                                        // and \x0C is whitespace to trim(), so the old
-                                        // "last non-trim-empty run" search skipped the
-                                        // br run, landed on the caption text, found no
-                                        // trailing \x0C and left the phantom page (Oxi
-                                        // p11 = footer-only, '4. Assessment' one page
-                                        // late, +1×94). Walk runs in reverse, stripping
-                                        // the LAST \x0C wherever it lives as long as
-                                        // only whitespace follows it; stop at the first
-                                        // run carrying real text. Probe (sect_probe:
-                                        // tpb/epb collapse at 2 pages, epb2/dbl/tpbtxt
-                                        // keep 3) re-confirms the strict adjacency the
-                                        // S794 derivation established.
-                                        for run in x.runs.iter_mut().rev() {
-                                            if let Some(pos) = run.text.rfind('\x0C') {
-                                                if run.text[pos + 1..].trim().is_empty() {
-                                                    run.text.remove(pos);
-                                                }
-                                                break;
-                                            }
-                                            if !run.text.trim().is_empty() {
-                                                break;
-                                            }
-                                        }
-                                        // the br-only-para conversion (page_break_after)
-                                        if x.runs.iter().all(|r| r.text.trim().is_empty())
-                                            && x.style.page_break_after
-                                        {
-                                            x.style.page_break_after = false;
-                                        }
-                                    }
-                                }
+                            // Defer boundary coalescing until the incoming section is known.
+                            if !section_carrier_has_artwork {
+                                redundant_break_candidates.push(sections.len());
                             }
                             // S945: mark the section-ending paragraph (it
                             // carries the in-body sectPr) — an EMPTY one never
@@ -2693,6 +2646,57 @@ fn parse_body(
         text_boxes: current_text_boxes,
         shapes: current_shapes,
     });
+
+    // A section type describes how that section starts, not how it ends.
+    for index in redundant_break_candidates {
+        let incoming_type = sections[index + 1].properties.section_type.clone();
+        if std::env::var("OXI_S794_DISABLE").is_err()
+            && incoming_type.as_deref() != Some("continuous")
+        {
+            let n = sections[index].blocks.len();
+            let s_empty = matches!(sections[index].blocks.last(), Some(Block::Paragraph(p))
+                if p.shapes.is_empty()
+                    && p.runs.iter().all(|r| r.text.trim().is_empty()));
+            if s_empty && n >= 2 {
+                if let Some(Block::Paragraph(x)) = sections[index].blocks.get_mut(n - 2)
+                {
+                    // S794b (2026-07-18): the trailing \x0C often
+                    // sits in its OWN run after the text runs
+                    // (reports__000e8acd caption: [Table ][SEQ 1]
+                    // [ EqIA weighting…][<w:r><w:br type=page/>]) —
+                    // and \x0C is whitespace to trim(), so the old
+                    // "last non-trim-empty run" search skipped the
+                    // br run, landed on the caption text, found no
+                    // trailing \x0C and left the phantom page (Oxi
+                    // p11 = footer-only, '4. Assessment' one page
+                    // late, +1×94). Walk runs in reverse, stripping
+                    // the LAST \x0C wherever it lives as long as
+                    // only whitespace follows it; stop at the first
+                    // run carrying real text. Probe (sect_probe:
+                    // tpb/epb collapse at 2 pages, epb2/dbl/tpbtxt
+                    // keep 3) re-confirms the strict adjacency the
+                    // S794 derivation established.
+                    for run in x.runs.iter_mut().rev() {
+                        if let Some(pos) = run.text.rfind('\x0C') {
+                            if run.text[pos + 1..].trim().is_empty() {
+                                run.text.remove(pos);
+                            }
+                            break;
+                        }
+                        if !run.text.trim().is_empty() {
+                            break;
+                        }
+                    }
+                    // the br-only-para conversion (page_break_after)
+                    if x.runs.iter().all(|r| r.text.trim().is_empty())
+                        && x.style.page_break_after
+                    {
+                        x.style.page_break_after = false;
+                    }
+                }
+            }
+        }
+    }
 
     // §17.2.2 / Round 10 (2026-04-08, COM-confirmed):
     // Word implicitly creates a single empty body paragraph when the
@@ -4444,6 +4448,7 @@ fn parse_paragraph_with_inline_images_impl(
             // In a table cell Word ignores a leading manual page break as a
             // row boundary. Preserve paragraph/style pageBreakBefore instead
             // of manufacturing one from the inline break.
+            style.page_break_before_from_inline = !style.page_break_before;
             style.page_break_before = true;
         }
         // Remove the break-only run; `chars_unit_run_style` above already kept
@@ -4607,7 +4612,9 @@ fn parse_paragraph_with_inline_images_impl(
         // path (legal__001410a8's 2 figure paragraphs carry a space run — with
         // `!text.is_empty()` they flowed inline and cost it 0.9655 → 0.9616).
         && (runs.iter().any(|run| s1251_host(run, s1251_ws_host)) || s1114_break_host || tab_inline_host)
-        && inline_img_runs.iter().all(|(_, im)| !im.data.is_empty());
+        && inline_img_runs.iter().all(|(_, im)| {
+            !im.data.is_empty() || im.alt_text.as_deref() == Some(S1182_SENTINEL)
+        });
     // S1066 (2026-08-05, default ON, opt-out OXI_S1066_DISABLE): the S854/S984
     // horizontal inline-image flow, extended to a TABLE CELL whose paragraph
     // ALSO has visible TEXT. S984 covers the cell case where the paragraph is

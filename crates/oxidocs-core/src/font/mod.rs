@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 pub mod runtime;
+mod catalog;
 pub mod shape;
 pub mod math_constants;
 pub mod math_glyphs;
@@ -124,6 +125,8 @@ struct RawFontMetrics {
     /// use the typo metrics for line layout instead of the GDI win box.
     #[serde(default)]
     use_typo_metrics: bool,
+    #[serde(default)]
+    codepage_range1: Option<u32>,
     /// Hex bitmap of glyph coverage over SYM_RANGES, one bit per codepoint,
     /// LSB-first within each byte (tools/metrics/add_symbol_fallback_metrics.py).
     /// Empty when the generator could not read the face (e.g. symbol.ttf, whose
@@ -205,6 +208,9 @@ pub struct FontMetrics {
     /// the GDI line (max(hhea, win)).
     #[serde(default)]
     pub use_typo_metrics: bool,
+    /// OS/2 code-page signature. None means the source did not provide it.
+    #[serde(default)]
+    pub codepage_range1: Option<u32>,
     /// Decoded `sym_coverage` bitmap; empty = unknown (never "absent").
     /// Not part of the serialized form (the registry rebuilds it from the raw
     /// hex on load), so `#[serde(skip)]` keeps FontMetrics round-trippable.
@@ -215,6 +221,28 @@ pub struct FontMetrics {
 }
 
 impl FontMetrics {
+    fn east_asian_design_line_height(&self, font_size: f32) -> f32 {
+        let win_sum = self.win_ascent + self.win_descent;
+        if self.codepage_range1.is_some() {
+            let upm = f32::from(self.units_per_em.max(1));
+            let selected_sum = if self.use_typo_metrics {
+                self.typo_ascent + self.typo_descent + self.typo_line_gap
+            } else {
+                win_sum
+            };
+            let design_height = (selected_sum * upm).round().max(0.0) as u32;
+            // Word adds the same rounded 15% design-unit padding to both
+            // sides of the selected metric box. Rounding a combined 30%
+            // instead loses one unit for boxes such as 230 or 258 units.
+            let half_leading = (design_height * 3 + 10) / 20;
+            (design_height + 2 * half_leading) as f32 * font_size / upm
+        } else {
+            // Legacy calibrated records without a font signature retain their
+            // prior spacing until their source metrics can be identified.
+            win_sum * font_size * (83.0 / 64.0)
+        }
+    }
+
     /// Look up the advance width for a character (normalized to 1em).
     /// Falls back to fullwidth/halfwidth heuristics for unmeasured chars.
     /// Does this face have a glyph for `c`?  `None` = no coverage data for
@@ -373,8 +401,7 @@ impl FontMetrics {
     /// For mixed-run lines: use max(word_ascent_pt) across all runs.
     pub fn word_ascent_pt(&self, font_size: f32) -> f32 {
         if self.is_cjk_83_64_font() {
-            let win_sum = self.win_ascent + self.win_descent;
-            let total = win_sum * font_size * (83.0 / 64.0);
+            let total = self.east_asian_design_line_height(font_size);
             // COM-confirmed: CJK 83/64 height uses floor quantization to 1/8pt
             let total = (total * 8.0).floor() / 8.0;
             return total * self.win_ascent / (self.win_ascent + self.win_descent);
@@ -395,8 +422,7 @@ impl FontMetrics {
     /// For mixed-run lines: use max(word_descent_pt) across all runs.
     pub fn word_descent_pt(&self, font_size: f32) -> f32 {
         if self.is_cjk_83_64_font() {
-            let win_sum = self.win_ascent + self.win_descent;
-            let total = win_sum * font_size * (83.0 / 64.0);
+            let total = self.east_asian_design_line_height(font_size);
             let total = (total * 8.0).floor() / 8.0;
             return total * self.win_descent / (self.win_ascent + self.win_descent);
         }
@@ -439,8 +465,7 @@ impl FontMetrics {
     pub fn word_line_height_no_grid(&self, font_size: f32) -> f32 {
         if self.is_cjk_83_64_font() {
             // CJK 83/64: return raw value, no quantization
-            let win_sum = self.win_ascent + self.win_descent;
-            return win_sum * font_size * (83.0 / 64.0);
+            return self.east_asian_design_line_height(font_size);
         }
         // Non-CJK: direct twips calculation, no pixel rounding
         let win_sum = self.win_ascent + self.win_descent;
@@ -583,6 +608,11 @@ impl FontMetrics {
     }
 
     pub fn is_cjk_83_64_font(&self) -> bool {
+        if let Some(codepages) = self.codepage_range1 {
+            // Japanese, simplified/traditional Chinese and Korean code pages.
+            // Use font properties rather than a list of family names.
+            return codepages & (0x1f << 17) != 0;
+        }
         // S322 (2026-05-26) — env-gated EXCLUDE Yu Mincho/Yu Gothic from
         // the 83/64 list to test the hypothesis: Yu* fonts have natural
         // win_a+win_d/upm ≈ 1.287 (already tall enough), while MS Mincho/
@@ -830,6 +860,11 @@ impl FontMetricsRegistry {
             raw_list.extend(faces);
         }
 
+        let presence_faces: Vec<RawFontMetrics> = serde_json::from_str(
+            include_str!("data/soei_presence_metrics.json")
+        ).expect("embedded Soei Presence face metrics should be valid JSON");
+        raw_list.extend(presence_faces);
+
         let jhenghei_faces: Vec<RawFontMetrics> = serde_json::from_str(
             include_str!("data/jhenghei_light_metrics.json")
         ).expect("embedded JhengHei metrics should be valid JSON");
@@ -945,6 +980,9 @@ impl FontMetricsRegistry {
                 typo_descent,
                 typo_line_gap,
                 use_typo_metrics: raw.use_typo_metrics,
+                codepage_range1: raw.codepage_range1
+                    .or_else(|| catalog::codepage_range1(&raw.family))
+                    .or_else(|| catalog::codepage_range1(&base_family_name(&raw.family))),
                 sym_coverage: decode_hex(&raw.sym_coverage),
                 char_widths,
             };
@@ -1021,6 +1059,7 @@ impl FontMetricsRegistry {
                     typo_descent: 471.0 / 2048.0,
                     typo_line_gap: 0.0,
                     use_typo_metrics: false,
+                    codepage_range1: catalog::codepage_range1("Gill Sans Nova"),
                     sym_coverage: Vec::new(),
                     char_widths: calibri.char_widths,
                 };
@@ -1404,6 +1443,18 @@ impl FontMetricsRegistry {
             return self.get_regular_with_synthetic_bold(family, bold);
         }
 
+        // A measured regular/bold face does not stand in for a missing italic
+        // face. Prefer the catalog's exact style before weaker substitutions,
+        // while keeping an existing calibrated entry for that exact style.
+        if (bold || italic)
+            && (!italic || std::env::var("OXI_ITALIC_METRICS_DISABLE").is_err())
+            && !self.table_has_styled_face(family, bold, italic)
+        {
+            if let Some(metrics) = catalog::resolve_styled(family, bold, italic) {
+                return metrics;
+            }
+        }
+
         if italic && std::env::var("OXI_ITALIC_METRICS_DISABLE").is_err() {
             let normalized = normalize_family_name(family);
             let base = if normalized.ends_with(" Regular") {
@@ -1447,7 +1498,8 @@ impl FontMetricsRegistry {
             && !self.table_has_styled_face(family, bold, italic)
             && !self.has_gdi_widths(family)
         {
-            if let Some(m) = runtime::resolve(family, bold, italic) {
+            if let Some(m) = catalog::resolve(family, bold, italic)
+                .or_else(|| runtime::resolve(family, bold, italic)) {
                 return m;
             }
         }
@@ -1496,7 +1548,8 @@ impl FontMetricsRegistry {
         // S1272: a CJK table entry with no CJK advances answers the wrong
         // question -- read the installed face instead of returning it.
         if self.cjk_table_lacks_cjk_widths(family) {
-            if let Some(m) = runtime::resolve(family, false, false) {
+            if let Some(m) = catalog::resolve(family, false, false)
+                .or_else(|| runtime::resolve(family, false, false)) {
                 return m;
             }
         }
@@ -1542,7 +1595,8 @@ impl FontMetricsRegistry {
         // outside the system font directory entirely. S1146 below is the right
         // answer only for a name Word could NOT resolve either.
         if !self.has_gdi_widths(family) {
-            if let Some(m) = runtime::resolve(family, false, false) {
+            if let Some(m) = catalog::resolve(family, false, false)
+                .or_else(|| runtime::resolve(family, false, false)) {
                 return m;
             }
         }
@@ -1599,6 +1653,7 @@ impl FontMetricsRegistry {
         if self.fonts.contains_key(family)
             || self.fonts.contains_key(&normalize_family_name(family))
             || self.fonts.contains_key(&base_family_name(family))
+            || catalog::resolve(family, false, false).is_some()
         {
             return true;
         }
@@ -1960,7 +2015,8 @@ fn is_cjk_or_symbol(c: char) -> bool {
 // (19.0) -> 437 > the 425 measure -> the title wraps, 2 extra grid rows, +1
 // page. The Pop table takes educational__12e79fcfe67f9074 to PASS the same way.
 fn is_soei_family(family: &str) -> bool {
-    matches!(family, "HGSoeiKakugothicUB" | "HGPSoeiKakugothicUB" | "HGSSoeiKakugothicUB")
+    matches!(family, "HGSoeiPresenceEB" | "HGPSoeiPresenceEB" | "HGSSoeiPresenceEB")
+        || matches!(family, "HGSoeiKakugothicUB" | "HGPSoeiKakugothicUB" | "HGSSoeiKakugothicUB")
         && std::env::var_os("OXI_SOEI_FACE_METRICS_DISABLE").is_none()
         || matches!(family, "HGSoeiKakupoptai" | "HGPSoeiKakupoptai" | "HGSSoeiKakupoptai")
             && std::env::var_os("OXI_SOEI_POP_METRICS_DISABLE").is_none()
@@ -2149,6 +2205,9 @@ fn normalize_family_name(name: &str) -> String {
     }
     match name {
         "微軟正黑體 Light" => "Microsoft JhengHei Light".to_string(),
+        "HG創英ﾌﾟﾚｾﾞﾝｽEB" => "HGSoeiPresenceEB".to_string(),
+        "HGP創英ﾌﾟﾚｾﾞﾝｽEB" => "HGPSoeiPresenceEB".to_string(),
+        "HGS創英ﾌﾟﾚｾﾞﾝｽEB" => "HGSSoeiPresenceEB".to_string(),
         "HG創英角ﾎﾟｯﾌﾟ体" if std::env::var_os("OXI_SOEI_POP_METRICS_DISABLE").is_none() => "HGSoeiKakupoptai".to_string(),
         "HGP創英角ﾎﾟｯﾌﾟ体" if std::env::var_os("OXI_SOEI_POP_METRICS_DISABLE").is_none() => "HGPSoeiKakupoptai".to_string(),
         "HGS創英角ﾎﾟｯﾌﾟ体" if std::env::var_os("OXI_SOEI_POP_METRICS_DISABLE").is_none() => "HGSSoeiKakupoptai".to_string(),
@@ -2417,6 +2476,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn metadata_line_spacing_matches_word_controls() {
+        #[derive(serde::Deserialize)]
+        struct Case {
+            name: String,
+            size: f32,
+            upm: u16,
+            win: [f32; 2],
+            typo: [f32; 3],
+            codepage_range1: u32,
+            use_typo_metrics: bool,
+            word_pitch: f32,
+        }
+        let cases: Vec<Case> = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/font_metadata_line_spacing.json"
+        )))
+        .unwrap();
+        let registry = FontMetricsRegistry::load();
+        for case in cases {
+            let mut metrics = registry.get("Calibri").clone();
+            let upm = f32::from(case.upm);
+            metrics.units_per_em = case.upm;
+            metrics.win_ascent = case.win[0] / upm;
+            metrics.win_descent = case.win[1] / upm;
+            metrics.typo_ascent = case.typo[0] / upm;
+            metrics.typo_descent = -case.typo[1] / upm;
+            metrics.typo_line_gap = case.typo[2] / upm;
+            metrics.codepage_range1 = Some(case.codepage_range1);
+            metrics.use_typo_metrics = case.use_typo_metrics;
+            let pitch = metrics.word_line_height_no_grid(case.size);
+            assert!(
+                (pitch - case.word_pitch).abs() <= 0.1201,
+                "{}: expected Word {}, got {}",
+                case.name, case.word_pitch, pitch
+            );
+        }
+    }
+
+    #[test]
     fn test_registry_loads() {
         let reg = FontMetricsRegistry::load();
         let calibri = reg.get("Calibri");
@@ -2547,6 +2645,25 @@ mod tests {
         // CJK char should be ~1.0em
         let kanji_w = yu.char_width_em('漢');
         assert!(kanji_w > 0.9 && kanji_w < 1.1, "kanji width: {}", kanji_w);
+    }
+
+    #[test]
+    fn soei_presence_names_preserve_face_widths_and_line_height() {
+        let registry = FontMetricsRegistry::load();
+        for (localized, canonical, latin_advance) in [
+            ("HG創英ﾌﾟﾚｾﾞﾝｽEB", "HGSoeiPresenceEB", 128.0),
+            ("HGP創英ﾌﾟﾚｾﾞﾝｽEB", "HGPSoeiPresenceEB", 170.0),
+            ("HGS創英ﾌﾟﾚｾﾞﾝｽEB", "HGSSoeiPresenceEB", 170.0),
+        ] {
+            for name in [localized, canonical] {
+                let metrics = registry.get(name);
+                assert_eq!(metrics.family, canonical);
+                assert_eq!(metrics.units_per_em, 256);
+                assert!((metrics.char_width_pt('A', 18.0) - latin_advance * 18.0 / 256.0).abs() < 0.001);
+                // Word's 18pt single-spaced Presence lines advance 23.4pt.
+                assert!((metrics.word_line_height(18.0, 150.0) - 23.4).abs() < 0.15);
+            }
+        }
     }
 
     #[test]

@@ -117,6 +117,17 @@ jobs:
           node --test web/vertical-text.test.mjs
           node web/vertical-layout.test.mjs pkg
 
+  font-catalog-tests:
+    if: ${{ !inputs.font_metrics }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install fonttools==4.62.0
+      - run: python -W error::ResourceWarning -m unittest discover -s tools/font-metrics-gen -p test_catalog.py -v
+
   font-metrics:
     if: ${{ inputs.font_metrics }}
     runs-on: windows-latest
@@ -134,6 +145,15 @@ jobs:
           Get-ChildItem C:/Windows/Fonts -File | Get-FileHash -Algorithm SHA256 | Select-Object Path,Hash | ConvertTo-Json | Set-Content font-metrics/font-hashes.json
       - name: Extract metrics
         run: cargo run --release --manifest-path tools/font-metrics-gen/Cargo.toml -- C:/Windows/Fonts font-metrics
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install catalog generator dependencies
+        run: python -m pip install fonttools==4.62.0
+      - name: Test complete font enumeration
+        run: python -W error::ResourceWarning -m unittest discover -s tools/font-metrics-gen -p test_catalog.py -v
+      - name: Export complete installed font catalog
+        run: python tools/font-metrics-gen/catalog.py --output font-metrics/catalog --portable-output font-metrics/portable
       - name: Verify requested font coverage
         shell: pwsh
         run: |
@@ -145,5 +165,5 @@ jobs:
         if: always()
         with:
           name: windows-font-metrics
-          path: font-metrics/*.json
+          path: font-metrics/
           retention-days: 30

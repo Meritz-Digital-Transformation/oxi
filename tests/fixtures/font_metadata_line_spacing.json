@@ -1,0 +1,546 @@
+[
+  {
+    "name": "case000_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      168,
+      42
+    ],
+    "typo": [
+      163,
+      -47,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 68.52
+  },
+  {
+    "name": "case001_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      168,
+      42
+    ],
+    "typo": [
+      163,
+      -47,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 136.95
+  },
+  {
+    "name": "case002_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      163,
+      -47,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 68.52
+  },
+  {
+    "name": "case003_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      163,
+      -47,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 136.95
+  },
+  {
+    "name": "case004_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      184,
+      46
+    ],
+    "typo": [
+      178,
+      -52,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 75.0
+  },
+  {
+    "name": "case005_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      184,
+      46
+    ],
+    "typo": [
+      178,
+      -52,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 150.03
+  },
+  {
+    "name": "case006_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      178,
+      -52,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 75.0
+  },
+  {
+    "name": "case007_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      178,
+      -52,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 150.03
+  },
+  {
+    "name": "case008_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      200,
+      50
+    ],
+    "typo": [
+      194,
+      -56,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 81.48
+  },
+  {
+    "name": "case009_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      200,
+      50
+    ],
+    "typo": [
+      194,
+      -56,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 162.99
+  },
+  {
+    "name": "case010_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      194,
+      -56,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 81.48
+  },
+  {
+    "name": "case011_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      194,
+      -56,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 162.99
+  },
+  {
+    "name": "case012_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      199,
+      -57,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 82.92
+  },
+  {
+    "name": "case013_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      199,
+      -57,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 165.99
+  },
+  {
+    "name": "case014_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      199,
+      -57,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 82.92
+  },
+  {
+    "name": "case015_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      199,
+      -57,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 165.99
+  },
+  {
+    "name": "case016_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      206,
+      52
+    ],
+    "typo": [
+      200,
+      -58,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 84.0
+  },
+  {
+    "name": "case017_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      206,
+      52
+    ],
+    "typo": [
+      200,
+      -58,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 168.03
+  },
+  {
+    "name": "case018_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      200,
+      -58,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 84.0
+  },
+  {
+    "name": "case019_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      200,
+      -58,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 168.03
+  },
+  {
+    "name": "case020_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      211,
+      53
+    ],
+    "typo": [
+      205,
+      -59,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 85.92
+  },
+  {
+    "name": "case021_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      211,
+      53
+    ],
+    "typo": [
+      205,
+      -59,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 171.99
+  },
+  {
+    "name": "case022_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      205,
+      -59,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 85.92
+  },
+  {
+    "name": "case023_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      205,
+      -59,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 171.99
+  },
+  {
+    "name": "case024_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      216,
+      54
+    ],
+    "typo": [
+      210,
+      -60,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 87.96
+  },
+  {
+    "name": "case025_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      216,
+      54
+    ],
+    "typo": [
+      210,
+      -60,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 175.95
+  },
+  {
+    "name": "case026_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      210,
+      -60,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 87.96
+  },
+  {
+    "name": "case027_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      210,
+      -60,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 175.95
+  },
+  {
+    "name": "case028_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      222,
+      56
+    ],
+    "typo": [
+      216,
+      -62,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 90.48
+  },
+  {
+    "name": "case029_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      222,
+      56
+    ],
+    "typo": [
+      216,
+      -62,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": false,
+    "word_pitch": 180.99
+  },
+  {
+    "name": "case030_latin",
+    "size": 64.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      216,
+      -62,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 90.48
+  },
+  {
+    "name": "case031_latin",
+    "size": 128.0,
+    "upm": 256,
+    "win": [
+      204,
+      52
+    ],
+    "typo": [
+      216,
+      -62,
+      0
+    ],
+    "codepage_range1": 131073,
+    "use_typo_metrics": true,
+    "word_pitch": 180.99
+  }
+]

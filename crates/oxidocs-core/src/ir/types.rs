@@ -1697,6 +1697,10 @@ pub struct ParagraphStyle {
     /// pageBreakBefore (S884 — same tri-state pattern as has_explicit_snap_to_grid).
     #[serde(default, skip_serializing)]
     pub has_explicit_page_break_before: bool,
+    /// The page boundary was promoted from a leading inline break.
+    /// Its paragraph spacing remains distinct from a paragraph break property.
+    #[serde(default)]
+    pub page_break_before_from_inline: bool,
     /// Page break AFTER this paragraph (empty-paragraph-with-inline-br pattern).
     /// Word renders the empty paragraph's mark on the CURRENT page then breaks.
     #[serde(default)]
@@ -1864,6 +1868,7 @@ impl Default for ParagraphStyle {
             ppr_rpr: None,
             page_break_before: false,
             has_explicit_page_break_before: false,
+            page_break_before_from_inline: false,
             page_break_after: false,
             borders: None,
             keep_next: false,

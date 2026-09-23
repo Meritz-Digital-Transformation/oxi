@@ -184,6 +184,7 @@ fn metrics_from(font: &skrifa::FontRef, family: &str) -> Option<FontMetrics> {
         typo_descent: typo_d,
         typo_line_gap: typo_gap,
         use_typo_metrics: use_typo,
+        codepage_range1: font.os2().ok().and_then(|os2| os2.ul_code_page_range_1()),
         sym_coverage: Vec::new(),
         char_widths,
     })

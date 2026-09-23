@@ -1,0 +1,290 @@
+[
+  {
+    "name": "case000_latin",
+    "family": "DotumChe",
+    "size": 9.0,
+    "script": "latin",
+    "pitch": 11.66,
+    "input_sha256": "07d39dad620a4ebc4b7cfaf4db19a148d39884e9a6da0b56ee202691bad5632d"
+  },
+  {
+    "name": "case001_cjk",
+    "family": "DotumChe",
+    "size": 9.0,
+    "script": "cjk",
+    "pitch": 11.66,
+    "input_sha256": "140cc647e74a75b523798e630075a3e5a9abfcfa4542840d1519ed64f39ecbf9"
+  },
+  {
+    "name": "case002_latin",
+    "family": "DotumChe",
+    "size": 24.0,
+    "script": "latin",
+    "pitch": 31.2,
+    "input_sha256": "c55cb84c0516443cb365e4bfd0d80dc9e95dae4a6d4f6552bc7b87ab403b0041"
+  },
+  {
+    "name": "case003_cjk",
+    "family": "DotumChe",
+    "size": 24.0,
+    "script": "cjk",
+    "pitch": 31.2,
+    "input_sha256": "ef1346d20a38a9b87468c4601f49c520b57abe4bca1ed1153db6da985860fade"
+  },
+  {
+    "name": "case004_latin",
+    "family": "DotumChe",
+    "size": 48.0,
+    "script": "latin",
+    "pitch": 62.4,
+    "input_sha256": "1d6eed18f354d10ffff4657562010cfb2df085268e6cc63f637d47aff228530d"
+  },
+  {
+    "name": "case005_cjk",
+    "family": "DotumChe",
+    "size": 48.0,
+    "script": "cjk",
+    "pitch": 62.4,
+    "input_sha256": "08846eb1c1877637ebd76aae2650da6a7e551cab59dbda0886f9c4a420c35e4b"
+  },
+  {
+    "name": "case006_latin",
+    "family": "PMingLiU",
+    "size": 9.0,
+    "script": "latin",
+    "pitch": 11.66,
+    "input_sha256": "76df2bac58722cb7784006bb790d49a62e912716dee4f4da2a4f08a6cc30f3cc"
+  },
+  {
+    "name": "case007_cjk",
+    "family": "PMingLiU",
+    "size": 9.0,
+    "script": "cjk",
+    "pitch": 11.66,
+    "input_sha256": "88119ae8734e75331fc5b9a1ebcdfafa8d0bfb735998d1e1591d68331a62c885"
+  },
+  {
+    "name": "case008_latin",
+    "family": "PMingLiU",
+    "size": 24.0,
+    "script": "latin",
+    "pitch": 31.2,
+    "input_sha256": "b2ab266286c6fdab6e4d0d574e642abcd51577564c9a1205ab323a65003c514f"
+  },
+  {
+    "name": "case009_cjk",
+    "family": "PMingLiU",
+    "size": 24.0,
+    "script": "cjk",
+    "pitch": 31.2,
+    "input_sha256": "28b33a832ee2e6304c2bad9a0ce577a8f57b37d19a22d130610debbdd197c7d9"
+  },
+  {
+    "name": "case010_latin",
+    "family": "PMingLiU",
+    "size": 48.0,
+    "script": "latin",
+    "pitch": 62.4,
+    "input_sha256": "b3da405f18064744749481f5181eb40bfcca7e2a85450ae71299c7e797be510b"
+  },
+  {
+    "name": "case011_cjk",
+    "family": "PMingLiU",
+    "size": 48.0,
+    "script": "cjk",
+    "pitch": 62.4,
+    "input_sha256": "cb2a1fd43e7eb7363fa157a81610b6a1a0316094c638a6a829fcfeb0f55a5511"
+  },
+  {
+    "name": "case012_latin",
+    "family": "MS UI Gothic",
+    "size": 9.0,
+    "script": "latin",
+    "pitch": 11.66,
+    "input_sha256": "3e7eb978cc582519b4dfce0b932de901144271b31c135e8b645fd3c1bff25c56"
+  },
+  {
+    "name": "case013_cjk",
+    "family": "MS UI Gothic",
+    "size": 9.0,
+    "script": "cjk",
+    "pitch": 11.66,
+    "input_sha256": "3f208547b1d31f34ea4b91178ce49eab80bd25c2d483691f05cb176c7e00b166"
+  },
+  {
+    "name": "case014_latin",
+    "family": "MS UI Gothic",
+    "size": 24.0,
+    "script": "latin",
+    "pitch": 31.08,
+    "input_sha256": "f6533bd627dc8bb1b8029f3a6638f93a91f57c2a1a1ec381347c443d9d7592d9"
+  },
+  {
+    "name": "case015_cjk",
+    "family": "MS UI Gothic",
+    "size": 24.0,
+    "script": "cjk",
+    "pitch": 31.08,
+    "input_sha256": "5bc3834868994c44b13abec6b481d0a917973be163f189ac49e9c18428c770f4"
+  },
+  {
+    "name": "case016_latin",
+    "family": "MS UI Gothic",
+    "size": 48.0,
+    "script": "latin",
+    "pitch": 62.28,
+    "input_sha256": "65ba1412d8e343f801747d8611c1d948de4073383227645188d646652d1111e0"
+  },
+  {
+    "name": "case017_cjk",
+    "family": "MS UI Gothic",
+    "size": 48.0,
+    "script": "cjk",
+    "pitch": 62.28,
+    "input_sha256": "4aaf9a44b7f1e54fef9b069d37936e580bbbe8a454ae01ea2179a78833c9d667"
+  },
+  {
+    "name": "case018_latin",
+    "family": "Meiryo UI",
+    "size": 9.0,
+    "script": "latin",
+    "pitch": 14.9,
+    "input_sha256": "5d693b037b90c3ec75c4dac1e312e4dd0283d150bb90a86232074c3d8b8a5ab8"
+  },
+  {
+    "name": "case019_cjk",
+    "family": "Meiryo UI",
+    "size": 9.0,
+    "script": "cjk",
+    "pitch": 14.9,
+    "input_sha256": "4f0d07399e0b3de36ab16342d30507851b07338281d16e0068fa9ba6e8697793"
+  },
+  {
+    "name": "case020_latin",
+    "family": "Meiryo UI",
+    "size": 24.0,
+    "script": "latin",
+    "pitch": 39.6,
+    "input_sha256": "a686a3a272ee6eb3e3ab6ad0d4b8e6ec09c2d1c5a714cf7eeb571d893e5294eb"
+  },
+  {
+    "name": "case021_cjk",
+    "family": "Meiryo UI",
+    "size": 24.0,
+    "script": "cjk",
+    "pitch": 39.6,
+    "input_sha256": "a8a59ddd470654a8381cb06e01e73f38543fd548e120bc92ceea7a13f1bd61ff"
+  },
+  {
+    "name": "case022_latin",
+    "family": "Meiryo UI",
+    "size": 48.0,
+    "script": "latin",
+    "pitch": 79.2,
+    "input_sha256": "02e71be50b69f5ccc965c4519f172576afd50f4d1a50cb2d3f84131d6ad91c07"
+  },
+  {
+    "name": "case023_cjk",
+    "family": "Meiryo UI",
+    "size": 48.0,
+    "script": "cjk",
+    "pitch": 79.2,
+    "input_sha256": "feb2816fc7039c1a5f332e187d3d128a3ce28993fc7895bb9b8cd5bc255a8415"
+  },
+  {
+    "name": "case024_latin",
+    "family": "Microsoft YaHei Light",
+    "size": 9.0,
+    "script": "latin",
+    "pitch": 14.9,
+    "input_sha256": "72bfde2b4d5ba35e6c357d34b92cf575a0191223dd3a3d074998399e0cd66202"
+  },
+  {
+    "name": "case025_cjk",
+    "family": "Microsoft YaHei Light",
+    "size": 9.0,
+    "script": "cjk",
+    "pitch": 14.9,
+    "input_sha256": "bd85400d2163cfb1ba26520cf97e9f941e8169e73ccd0eddbf03e0a07fd41e57"
+  },
+  {
+    "name": "case026_latin",
+    "family": "Microsoft YaHei Light",
+    "size": 24.0,
+    "script": "latin",
+    "pitch": 39.84,
+    "input_sha256": "0b90353baa9cff0750899d0fe0ddea43b073b94dc1968360dd2dd58567905952"
+  },
+  {
+    "name": "case027_cjk",
+    "family": "Microsoft YaHei Light",
+    "size": 24.0,
+    "script": "cjk",
+    "pitch": 39.84,
+    "input_sha256": "c305e1126874d9c07b7f5d72541f058f69e6a765a147fe4337f4bb5c1012ba47"
+  },
+  {
+    "name": "case028_latin",
+    "family": "Microsoft YaHei Light",
+    "size": 48.0,
+    "script": "latin",
+    "pitch": 79.68,
+    "input_sha256": "3171c0bfe3124f459ebc85e9acea199bf2ccc54920318b5ef39a5a4689c6d0e0"
+  },
+  {
+    "name": "case029_cjk",
+    "family": "Microsoft YaHei Light",
+    "size": 48.0,
+    "script": "cjk",
+    "pitch": 79.68,
+    "input_sha256": "635e3fe676a96a600dbeaa58ba05ef7808c01f91dc95a339e3861e49fb521fc6"
+  },
+  {
+    "name": "case030_latin",
+    "family": "Klee One",
+    "size": 9.0,
+    "script": "latin",
+    "pitch": 16.92,
+    "input_sha256": "668edcc57a19269162538324b9252b288e9487ed5b062693305b6a827450f9dd"
+  },
+  {
+    "name": "case031_cjk",
+    "family": "Klee One",
+    "size": 9.0,
+    "script": "cjk",
+    "pitch": 16.92,
+    "input_sha256": "f5056c51fb16d36134a1a1e14e4dca828592458c77f347d3f77a5ee2547e1272"
+  },
+  {
+    "name": "case032_latin",
+    "family": "Klee One",
+    "size": 24.0,
+    "script": "latin",
+    "pitch": 45.12,
+    "input_sha256": "c598fe1e467e087e605be4b2725fc6a525d1f8d58ded4aa78182f9788673274a"
+  },
+  {
+    "name": "case033_cjk",
+    "family": "Klee One",
+    "size": 24.0,
+    "script": "cjk",
+    "pitch": 45.12,
+    "input_sha256": "fd75dd5ff1eb4ee7a9047c5095a3f2ac9c5181229256a0e0147228ac48237c43"
+  },
+  {
+    "name": "case034_latin",
+    "family": "Klee One",
+    "size": 48.0,
+    "script": "latin",
+    "pitch": 90.36,
+    "input_sha256": "13c44e96a8ed4e161b37e829a68dc2b054f53197dedd9baf464b67d2596701ce"
+  },
+  {
+    "name": "case035_cjk",
+    "family": "Klee One",
+    "size": 48.0,
+    "script": "cjk",
+    "pitch": 90.36,
+    "input_sha256": "6112a6ad91548708e6bce84d9675dd870bbc808c236945c958c78df660443c05"
+  }
+]

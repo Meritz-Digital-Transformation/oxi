@@ -1963,7 +1963,7 @@ fn merged_cell_coordinates_do_not_use_available_height_as_page_stride() {
                 lines: vec![
                     MergedCellFlowLine { y: 0.0, fit: 20.0, elements: vec![(0, 0.0)] },
                     MergedCellFlowLine { y: 30.0, fit: 20.0, elements: vec![(1, 30.0)] },
-                ], keep_lines: false, before: 0.0, after: 0.0,
+                ], keep_lines: false, widow_control: false, before: 0.0, after: 0.0,
             }], cuts: std::collections::BTreeMap::new(),
         };
         let (positions, end) = flow.paginate();
@@ -1977,6 +1977,28 @@ fn merged_cell_coordinates_do_not_use_available_height_as_page_stride() {
     }
 }
 
+
+#[test]
+fn merged_cell_widow_control_moves_three_line_paragraph() {
+    // Word controls: the first row fragment can hold two of three lines.
+    // With widow control, Word places the complete paragraph in the next band.
+    for (widow_control, expected_pages) in [(false, vec![0, 0, 1]), (true, vec![1, 1, 1])] {
+        let flow = MergedCellTextFlow {
+            identity: std::sync::Arc::new(()), key: 0, start_row: 0,
+            source_page: 0, origin: 670.767, page_top: 72.0, page_height: 648.0,
+            coordinate_stride: 1000.0, header: 16.25, pad_top: 0.5, pad_bottom: 0.0,
+            content_height: 42.114, element_count: 3,
+            paragraphs: vec![MergedCellFlowParagraph {
+                lines: (0..3).map(|i| MergedCellFlowLine {
+                    y: i as f32 * 14.038, fit: 14.038,
+                    elements: vec![(i, i as f32 * 14.038)],
+                }).collect(), keep_lines: false, widow_control, before: 0.0, after: 0.0,
+            }], cuts: [(0, (700.767, 88.75))].into_iter().collect(),
+        };
+        let (positions, _) = flow.paginate();
+        assert_eq!(positions.iter().map(|p| p.unwrap().0).collect::<Vec<_>>(), expected_pages);
+    }
+}
 
 #[test]
 fn exact_cell_baselines_match_word_across_fonts_and_sizes() {
@@ -3642,5 +3664,100 @@ fn keep_next_across_last_column_matches_word() {
             matches!(&e.content, LayoutContent::Text { text, .. } if e.paragraph_index == Some(heading_index + 1) && !text.is_empty())
         })).map(|p| p + 1);
         assert_eq!(first_body_page, Some(body_page), "{name}: first body line");
+    }
+}
+
+#[test]
+fn font_signature_line_spacing_matches_word() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/font_signature_line_spacing");
+    let cases: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root.join("word.json")).unwrap(),
+    ).unwrap();
+    let mut failures = Vec::new();
+    for case in cases.as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let doc = crate::parser::parse_docx(
+            &std::fs::read(root.join(format!("{name}.docx"))).unwrap(),
+        ).unwrap();
+        let layout = LayoutEngine::for_document(&doc).layout(&doc);
+        let mut starts = [None::<f32>; 2];
+        for page in &layout.pages {
+            for element in &page.elements {
+                if let Some(index) = element.paragraph_index.filter(|&i| i < 2) {
+                    if matches!(&element.content, LayoutContent::Text { text, .. } if !text.is_empty()) {
+                        let y = element.y + element.text_y_off;
+                        starts[index] = Some(starts[index].map_or(y, |old| old.min(y)));
+                    }
+                }
+            }
+        }
+        let actual = starts[0].zip(starts[1]).map(|(a, b)| f64::from(b - a));
+        let expected = case["pitch"].as_f64().unwrap();
+        if layout.pages.len() != 1 || actual.map_or(true, |v| (v - expected).abs() > 0.1201) {
+            failures.push(format!("{name} {} {}pt: Word {expected}, Oxi {actual:?}, pages {}",
+                case["family"], case["size"], layout.pages.len()));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn styled_cell_wrap_matches_word() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/styled_cell_wrap");
+    let cases: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root.join("word.json")).unwrap(),
+    ).unwrap();
+    let mut failures = Vec::new();
+    for case in cases.as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let doc = crate::parser::parse_docx(
+            &std::fs::read(root.join(format!("{name}.docx"))).unwrap(),
+        ).unwrap();
+        let layout = LayoutEngine::for_document(&doc).layout(&doc);
+        let mut rows = Vec::<f32>::new();
+        for page in &layout.pages {
+            for element in &page.elements {
+                if element.cell_row_index == Some(0)
+                    && matches!(&element.content, LayoutContent::Text { text, .. } if !text.is_empty())
+                    && !rows.iter().any(|y| (*y - element.y).abs() < 0.01)
+                {
+                    rows.push(element.y);
+                }
+            }
+        }
+        let expected = case["lines"].as_u64().unwrap() as usize;
+        if layout.pages.len() != 1 || rows.len() != expected {
+            failures.push(format!("{name}: Word {expected} lines, Oxi {} on {} pages",
+                rows.len(), layout.pages.len()));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn modern_inline_and_paragraph_breaks_preserve_distinct_spacing() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/modern_break_spacing");
+    let cases: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root.join("word.json")).unwrap()).unwrap();
+    for case in cases.as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let doc = crate::parser::parse_docx(
+            &std::fs::read(root.join(format!("{name}.docx"))).unwrap()).unwrap();
+        let layout = LayoutEngine::for_document(&doc).layout(&doc);
+        assert_eq!(layout.pages.len(), case["pages"].as_u64().unwrap() as usize, "{name}");
+        let (page, element) = layout.pages.iter().enumerate().find_map(|(i, p)| {
+            p.elements.iter().find(|e| matches!(&e.content,
+                LayoutContent::Text { text, .. } if text == "SENTINEL"))
+                .map(|e| (i + 1, e))
+        }).unwrap();
+        assert_eq!(page, case["word"]["page"].as_u64().unwrap() as usize, "{name}");
+        // All fixtures use a 15pt exact line: Word's baseline is 12pt in.
+        let baseline = element.y as f64 + 12.0;
+        let expected = case["word"]["y"].as_f64().unwrap();
+        assert!((baseline - expected).abs() < 0.2,
+            "{name}: Word {expected}, actual {baseline}");
     }
 }
