@@ -344,6 +344,10 @@ impl FontMetrics {
         // CJK monospace fonts (UPM=256): COM confirmed — fullwidth = fontSize, halfwidth = fontSize/2
         // No GDI pixel rounding; Word uses the point value directly.
         if self.units_per_em == 256 && is_fullwidth(c) {
+            if std::env::var_os("OXI_DBG_CW").is_some() && (c as u32) == 0x3000 {
+                eprintln!("[CW] fullwidth256 family={:?} fs={} -> {:.4}",
+                    self.family, font_size, font_size + extra);
+            }
             return font_size + extra;
         }
         if self.units_per_em == 256 && (is_halfwidth_katakana(c) || advance_em <= 0.51) {
@@ -353,7 +357,12 @@ impl FontMetrics {
         // COM-confirmed (2026-04-14, 13 font/size combos, 181 chars):
         // Word rounds char widths to 10tw (0.5pt), not 1tw.
         let width_tw = (advance_em * font_size * 20.0 / 10.0 + 0.5).floor() * 10.0;
-        width_tw / 20.0 + extra
+        let out = width_tw / 20.0 + extra;
+        if std::env::var_os("OXI_DBG_CW").is_some() && (c as u32) == 0x3000 {
+            eprintln!("[CW] tail family={:?} upm={} em={:.6} fs={} extra={:.4} -> {:.4}",
+                self.family, self.units_per_em, advance_em, font_size, extra, out);
+        }
+        out
     }
 
     /// Simple line height in points (no pixel rounding).
@@ -1952,12 +1961,50 @@ impl FontMetricsRegistry {
         if metrics.char_widths.contains_key(&c) {
             let advance_em = metrics.char_width_em(c);
             let width_tw = (advance_em * font_size * 20.0 / 10.0 + 0.5).floor() * 10.0;
+            if std::env::var_os("OXI_DBG_CW").is_some() && (c as u32) == 0x3000 {
+                eprintln!("[CW] {} family={:?} upm={} has_cw={} fs={} -> {:.4}",
+                    "gdimap-charwidths", metrics.family, metrics.units_per_em,
+                    metrics.char_widths.contains_key(&c), font_size, width_tw / 20.0);
+            }
             return width_tw / 20.0;
         }
 
+        // S1519 (2026-09-23, opt-out OXI_CATALOG_BEFORE_GDI_DISABLE): before
+        // falling back to the GDI pixel map, ask the font catalog. The map is
+        // documented just below as being 'for fonts without metric data', but
+        // HGPGothicM reaches it WITH metric data available: its FontMetrics
+        // carries no char_widths (the compact table has no such family and the
+        // catalog is only consulted for bold/italic), so every glyph lands on
+        // the pixel map. U+3000 there is 11px = 8.25pt at 12pt, where the
+        // catalog and the installed HGRGM.TTC both say 170/256 = 7.969 and
+        // Word's PDF spends 7.92. legal__0d0568b6 wrapped one line on that
+        // 0.28pt x 3, which pushed its last paragraph onto a second page.
+        // Scope: only a face with NO measured advances at all. Asking the
+        // catalog for any glyph a face merely lacks is too wide -- Eras Bold
+        // ITC has its own table and reaches the pixel map for a few glyphs
+        // where GDI is the closer answer; using the catalog there cost
+        // educational__00252fa8 a page (785 -> 784).
+        if std::env::var_os("OXI_CATALOG_BEFORE_GDI_DISABLE").is_none()
+            && metrics.char_widths.is_empty()
+        {
+            if let Some(cat) = catalog::resolve(&metrics.family, false, false) {
+                if let Some(&advance_em) = cat.char_widths.get(&c) {
+                    let width_tw = (advance_em * font_size * 20.0 / 10.0 + 0.5).floor() * 10.0;
+                    if std::env::var_os("OXI_DBG_CW").is_some() && (c as u32) == 0x3000 {
+                        eprintln!("[CW] catalog family={:?} em={:.6} fs={} -> {:.4}",
+                            metrics.family, advance_em, font_size, width_tw / 20.0);
+                    }
+                    return width_tw / 20.0;
+                }
+            }
+        }
         // GDI hinting override via pre-resolved map (for fonts without metric data)
         if let Some(char_widths) = gdi_map {
             if let Some(&width_px) = char_widths.get(&(c as u32)) {
+                if std::env::var_os("OXI_DBG_CW").is_some() && (c as u32) == 0x3000 {
+                    eprintln!("[CW] gdimap-PX family={:?} has_cw={} px={} fs={}",
+                        metrics.family, metrics.char_widths.contains_key(&c), width_px, font_size);
+                }
                 return width_px as f32 * 72.0 / 96.0;
             }
         }
