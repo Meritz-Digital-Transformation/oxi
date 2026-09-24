@@ -52427,6 +52427,34 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                     let overflow_on_next = row_bottom - split_y;
                     let pages_used = ((overflow_on_next) / content_height).floor() as usize;
                     cursor.set(page_top + overflow_on_next - (pages_used as f32 * content_height));
+                    // S1526 (2026-09-24, opt-out OXI_S1526_DISABLE): the geometric
+                    // remainder (row_bottom − split_y) knows no line granularity.
+                    // A cell whose line straddles the split carries that WHOLE
+                    // line to the next page, so the continuation is taller than
+                    // the remainder. educational__0056be35 row 11 (3 cells, an
+                    // LRPB mid-row so the S754 branch above is skipped): the
+                    // remainder is 19.9 while cell 2 continues with two lines
+                    // (Word PDF: 74.9 / 89.5, rule at 101.8, row 12 at 104.7);
+                    // Oxi set row 12 at 92.4 over the second line, −11pt for the
+                    // rest of the table and the three −1 paragraphs downstream.
+                    // Floor the cursor at the measured continuation text bottom
+                    // when the continuation stays on this one page.
+                    if std::env::var_os("OXI_S1526_DISABLE").is_none() && pages_used == 0 {
+                        let cont_text_bottom = elements
+                            .iter()
+                            .filter(|e| matches!(&e.content, LayoutContent::Text { text, .. } if !text.trim().is_empty()))
+                            .map(|e| e.y + e.height)
+                            .fold(f32::NEG_INFINITY, f32::max);
+                        if cont_text_bottom.is_finite()
+                            && cont_text_bottom <= page_top + content_height + 0.5
+                            && cursor.cursor_y < cont_text_bottom
+                        {
+                            if std::env::var("OXI_DBG_SPLIT").is_ok() {
+                                eprintln!("[SPLIT-CURSOR] s1526 floor {:.2} -> {:.2}", cursor.cursor_y, cont_text_bottom);
+                            }
+                            cursor.set(cont_text_bottom);
+                        }
+                    }
                     if std::env::var("OXI_DBG_SPLIT").is_ok() {
                         eprintln!("[SPLIT-CURSOR] branch=geom cursor={:.2} (row_bottom={:.2} split_y={:.2})",
                             cursor.cursor_y, row_bottom, split_y);
