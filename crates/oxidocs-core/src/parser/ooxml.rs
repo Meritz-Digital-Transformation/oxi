@@ -87,6 +87,17 @@ impl ParseContext {
                 .map_or(false, |name| name.eq_ignore_ascii_case("HYPERLINK")))
     }
 
+    /// S1524 (2026-09-24, opt-out OXI_S1524_DISABLE): inside a field's CODE
+    /// (after `begin`, before `separate`) nothing is displayed — not only
+    /// `instrText` but also a `<w:noBreakHyphen/>`, `<w:tab/>`, `<w:br/>`,
+    /// `<w:sym/>` or a stray `<w:t>` that a legacy TOC switch carries.
+    /// legal__003a2d04: `TOC ... \n "2‑7"` keeps its hyphen as a run-level
+    /// noBreakHyphen and Oxi drew "‑1.  Short title" (Word PDF: "1.").
+    fn in_field_code(&self) -> bool {
+        std::env::var_os("OXI_S1524_DISABLE").is_none()
+            && self.fields.borrow().last().map_or(false, |f| !f.result)
+    }
+
     fn field_control(&self, e: &quick_xml::events::BytesStart<'_>, text: &mut String) {
         for attr in e.attributes().flatten() {
             if local_name(attr.key.as_ref()) != "fldCharType" { continue; }
@@ -4231,6 +4242,21 @@ fn parse_paragraph_with_inline_images_impl(
             alignment = doc_align;
         }
     }
+    // S1525 (2026-09-24): does the direct jc depart from what the style chain
+    // would have resolved? correspondence__009c9911's blank footer paragraph
+    // (pStyle Footer, direct jc=center): Word reserves the footer line; with the
+    // jc removed, set to left, or moved into the Footer style, it does not
+    // (5-arm probe, Word PDF). The chain is the paragraph style's jc, else
+    // docDefaults, else left.
+    if has_explicit_jc {
+        let chain = effective_style_id
+            .as_ref()
+            .and_then(|sid| styles.styles.get(sid))
+            .and_then(|d| d.alignment)
+            .or(styles.doc_default_alignment)
+            .unwrap_or_default();
+        style.has_direct_alignment_off_style = alignment != chain;
+    }
 
     // S771: was this numPr set DIRECTLY on the paragraph's pPr, or inherited
     // from the paragraph style? The R12 numbering-indent-override below is only
@@ -6225,7 +6251,9 @@ fn parse_run(
             }
             Event::Text(e) => {
                 let content = e.unescape().unwrap_or_default();
-                if in_text {
+                if in_text && ctx.in_field_code() {
+                    // S1524: a `<w:t>` inside the field CODE is not displayed.
+                } else if in_text {
                     // Literal XML newlines are spaces; explicit w:br/w:cr are
                     // handled separately and retain their line-break semantics.
                     let content = if std::env::var("OXI_LITERAL_TEXT_NEWLINES").is_ok()
@@ -6306,6 +6334,9 @@ fn parse_run(
             Event::Empty(e) => {
                 let local = local_name(e.name().as_ref());
                 match local.as_str() {
+                    // S1524: field CODE content is not displayed (see in_field_code).
+                    "sym" | "cr" | "br" | "tab" | "noBreakHyphen" | "softHyphen" | "ptab"
+                        if depth == 0 && ctx.in_field_code() => {}
                     "sym" if depth == 0 => {
                         append_run_symbol(&e, &mut text, &mut symbol_spans);
                     }

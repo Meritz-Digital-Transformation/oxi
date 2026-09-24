@@ -1583,6 +1583,12 @@ pub struct ParagraphStyle {
     /// direct tabs+ind must).
     #[serde(default)]
     pub has_direct_tabs_or_ind: bool,
+    /// S1525 (2026-09-24): the DIRECT `<w:jc>` names a value the style chain
+    /// (paragraph style, docDefaults, else left) would not have given. A blank
+    /// footer paragraph whose direct alignment departs from its style reserves
+    /// its line like a text footer; one that merely restates the chain does not.
+    #[serde(default)]
+    pub has_direct_alignment_off_style: bool,
     /// S865: DIRECT pPr spacing specifies a before-side value
     /// (before/beforeLines/beforeAutospacing). Kept per-side because Word
     /// resets an unspecified opposite side to the table-cell default.
@@ -1852,6 +1858,7 @@ impl Default for ParagraphStyle {
             has_direct_alignment: false,
             has_direct_before_after: false,
             has_direct_tabs_or_ind: false,
+            has_direct_alignment_off_style: false,
             has_direct_before: false,
             has_direct_after: false,
             line_spacing_from_doc_defaults: false,

@@ -19592,7 +19592,15 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                     // (style-inherited tab stops) stays untouched; bd832's
                     // direct tabs+ind counts (the first cut used the merged
                     // tab_stops/indents and flipped ea8f PASS->FAIL).
-                    Block::Paragraph(p) => p.style.has_direct_tabs_or_ind,
+                    // S1525 (2026-09-24, opt-out OXI_S1525_DISABLE): a direct
+                    // jc that departs from the style chain counts too
+                    // (correspondence__009c9911: blank Footer para, direct
+                    // jc=center → Word reserves dist+line; jc removed / left /
+                    // moved into the style → it does not. 5-arm Word PDF probe,
+                    // tests/fixtures/ftr_jc).
+                    Block::Paragraph(p) => p.style.has_direct_tabs_or_ind
+                        || (p.style.has_direct_alignment_off_style
+                            && std::env::var_os("OXI_S1525_DISABLE").is_none()),
                     _ => false,
                 });
             if std::env::var("OXI_DBG_FTR").is_ok() {
