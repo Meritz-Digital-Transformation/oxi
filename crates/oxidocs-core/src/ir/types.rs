@@ -765,6 +765,26 @@ pub struct TableRow {
     /// Row-level cell margin override from w:tblPrEx/w:tblCellMar
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cell_margins_override: Option<CellMargins>,
+    /// Row-level table border exception from w:tblPrEx/w:tblBorders (S1523).
+    /// The parser folds it into the row's cell borders; kept on the row so a
+    /// writer can round-trip it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_exception: Option<RowBorderException>,
+}
+
+/// w:tblPrEx/w:tblBorders: the table's border set as overridden for one row
+/// (legacy Word 97-2003 tables carry it per row). Only the horizontal edges
+/// matter for layout: `inside_h` rules the edges this row shares with its
+/// neighbours, `top`/`bottom` the table's outer edge when the row is first/last.
+/// An explicit `nil`/`none` is kept as the `{style: "none"}` sentinel.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RowBorderException {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top: Option<BorderDef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom: Option<BorderDef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inside_h: Option<BorderDef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

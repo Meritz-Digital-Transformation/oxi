@@ -55054,6 +55054,7 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                 cant_split: false,
                 grid_before: 0,
                 cell_margins_override: row.cell_margins_override.clone(),
+                border_exception: None,
             };
             let merged_h = self.estimate_table_row_natural_h(
                 &probe_row,

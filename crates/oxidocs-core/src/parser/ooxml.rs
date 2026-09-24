@@ -10881,6 +10881,32 @@ fn parse_table(
     }
 
     // Apply tblStylePr conditional formatting to cells
+    // S1523 (2026-09-24, opt-out OXI_S1523_DISABLE): fold each row's
+    // w:tblPrEx/w:tblBorders into its cells' own borders where the cell does
+    // not declare the edge itself. `insideH` rules the edges shared with the
+    // neighbouring rows; `top`/`bottom` the table's outer edge on the first/
+    // last row. A `none` lands as the S482 sentinel, which already kills the
+    // table-level insideH for the row pad (S911) and for drawing (S482).
+    if std::env::var_os("OXI_S1523_DISABLE").is_none() {
+        let n = rows.len();
+        for i in 0..n {
+            let Some(ex) = rows[i].border_exception.clone() else { continue };
+            let top_edge = if i == 0 { ex.top.clone().or_else(|| ex.inside_h.clone()) } else { ex.inside_h.clone() };
+            let bottom_edge = if i + 1 == n { ex.bottom.clone().or_else(|| ex.inside_h.clone()) } else { ex.inside_h.clone() };
+            if top_edge.is_none() && bottom_edge.is_none() {
+                continue;
+            }
+            for cell in rows[i].cells.iter_mut() {
+                let b = cell.borders.get_or_insert(CellBorders { top: None, bottom: None, left: None, right: None });
+                if b.top.is_none() {
+                    b.top = top_edge.clone();
+                }
+                if b.bottom.is_none() {
+                    b.bottom = bottom_edge.clone();
+                }
+            }
+        }
+    }
     if let Some(ref style_id) = style.style_id {
         if let Some(cond_fmts) = styles.table_conditional_formats.get(style_id) {
             let look = style.tbl_look.unwrap_or_default();
@@ -11447,6 +11473,7 @@ fn parse_table_row(
     let mut cant_split = inherited_row_no_split;
     let mut grid_before: u32 = 0;
     let mut cell_margins_override: Option<CellMargins> = None;
+    let mut border_exception: Option<RowBorderException> = None;
     let mut depth = 0;
     let mut in_row_properties = false;
     let mut tracked_change = None;
@@ -11556,6 +11583,56 @@ fn parse_table_row(
                                         cell_margins_override = Some(margins);
                                         continue;
                                     }
+                                    // S1523 (2026-09-24, opt-out OXI_S1523_DISABLE):
+                                    // w:tblPrEx/w:tblBorders. legal__003b5088's
+                                    // compilation table declares insideH sz=8 at the
+                                    // table and `none` on every data row; Word draws
+                                    // no rule between the rows and its row pitch
+                                    // carries no border (PDF: 25.80 = 2 x 10.92 + 3.96
+                                    // vs Oxi 26.85). Kept as the S482 sentinel and
+                                    // folded into the cells at the table site.
+                                    if sl == "tblBorders"
+                                        && ex_depth == 0
+                                        && std::env::var_os("OXI_S1523_DISABLE").is_none()
+                                    {
+                                        let mut ex = RowBorderException::default();
+                                        loop {
+                                            match reader.read_event() {
+                                                Ok(Event::Empty(be)) => {
+                                                    let bl = local_name(be.name().as_ref());
+                                                    let bdr = parse_border_attrs(&be).or_else(|| {
+                                                        let explicit_none = be.attributes().flatten().any(|a| {
+                                                            local_name(a.key.as_ref()) == "val" && {
+                                                                let v = String::from_utf8_lossy(&a.value);
+                                                                v == "nil" || v == "none"
+                                                            }
+                                                        });
+                                                        explicit_none.then(|| BorderDef {
+                                                            style: "none".to_string(),
+                                                            width: 0.0,
+                                                            color: None,
+                                                            space: 0.0,
+                                                        })
+                                                    });
+                                                    match bl.as_str() {
+                                                        "top" => ex.top = bdr,
+                                                        "bottom" => ex.bottom = bdr,
+                                                        "insideH" => ex.inside_h = bdr,
+                                                        _ => {}
+                                                    }
+                                                }
+                                                Ok(Event::End(ee)) => {
+                                                    if local_name(ee.name().as_ref()) == "tblBorders" {
+                                                        break;
+                                                    }
+                                                }
+                                                Ok(Event::Eof) | Err(_) => break,
+                                                _ => {}
+                                            }
+                                        }
+                                        border_exception = Some(ex);
+                                        continue;
+                                    }
                                     ex_depth += 1;
                                 }
                                 Event::End(se) => {
@@ -11648,6 +11725,7 @@ fn parse_table_row(
         cant_split,
         grid_before,
         cell_margins_override,
+        border_exception,
     })
 }
 
