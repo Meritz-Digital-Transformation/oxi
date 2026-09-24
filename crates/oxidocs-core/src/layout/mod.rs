@@ -12402,12 +12402,15 @@ cells={} pitch={:.2} text={:?}",
                                     }
                                     (k + 1).min(next_table.rows.len().max(1))
                                 };
-                                let first_row_h = if std::env::var("OXI_S1038_DISABLE").is_ok()
+                                // S1522 (2026-09-24): the pair is (whole chain height,
+                                // height up to the first text line of the chain's LAST
+                                // row). See `s1038_need_h` below for which one Word asks.
+                                let (first_row_h, s1522_first_line_h) = if std::env::var("OXI_S1038_DISABLE").is_ok()
                                     || (self.doc_body_has_real_cjk
                                         && std::env::var("OXI_CJK_TABLE_KEEP_NEXT").ok().as_deref() != Some("1"))
                                     || next_table.rows.is_empty()
                                 {
-                                    0.0
+                                    (0.0, 0.0)
                                 } else {
                                     let mut one = next_table.clone();
                                     one.rows.truncate(s1248_chain_rows);
@@ -12439,13 +12442,36 @@ cells={} pitch={:.2} text={:?}",
                                         None,
                                     );
                                     if rp.is_empty() {
-                                        rels.iter()
+                                        let whole = rels.iter()
                                             .chain(re.iter())
                                             .map(|el| el.y + el.height)
                                             .fold(start_y, f32::max)
-                                            - start_y
+                                            - start_y;
+                                        // First text line of the chain's last row: per
+                                        // cell the lowest-bottom text element, then the
+                                        // tallest cell (the row splits per cell, each
+                                        // cell contributes its first line).
+                                        let last = s1248_chain_rows.max(1) - 1;
+                                        let mut per_cell: std::collections::BTreeMap<usize, f32> =
+                                            std::collections::BTreeMap::new();
+                                        for el in rels.iter().chain(re.iter()) {
+                                            if el.cell_row_index != Some(last) {
+                                                continue;
+                                            }
+                                            if !matches!(el.content, LayoutContent::Text { .. }) {
+                                                continue;
+                                            }
+                                            let b = el.y + el.height;
+                                            let slot = per_cell.entry(el.cell_col_index.unwrap_or(0)).or_insert(b);
+                                            if b < *slot {
+                                                *slot = b;
+                                            }
+                                        }
+                                        let first_line = per_cell.values().cloned().fold(0.0f32, f32::max);
+                                        let first_line = if first_line > start_y { first_line - start_y } else { whole };
+                                        (whole, first_line.min(whole))
                                     } else {
-                                        0.0
+                                        (0.0, 0.0)
                                     }
                                 };
                                 // S1127 (2026-08-15, SHIPPED default-ON with S1126, opt-out
@@ -12479,6 +12505,35 @@ cells={} pitch={:.2} text={:?}",
                 // this one. 00549a8f's table is small (207.7pt, fresh1=true) and
                 // has no keepNext row-chain, so S1024 leaves it alone; the first
                 // row still cannot follow the heading, and Word still pushes.
+                // S1521 (2026-09-24, opt-out OXI_S1038_SPLIT_DISABLE): S1038 asks
+                // whether the WHOLE first row (or leading keepNext row-chain)
+                // fits under the heading. That is Word's rule only when that
+                // row CANNOT break: policies__0021ede1, where S1038 was derived,
+                // has cantSplit on every row. legal__003b5088 has none, and Word
+                // keeps `Division 3` + `[Heading inserted` on p27 with the first
+                // TWO lines of an 8-line (107pt) row 1 under them, breaking the
+                // row across the page. Faithful slice, 22 arms (rem 0..120 x
+                // cantSplit on/off, Word PDF): without cantSplit the heading
+                // stays on the page at every rem, down to a single row-1 line
+                // beneath it; with cantSplit injected it moves until the whole
+                // row fits (rem >= 96). So the whole-row orphan test applies
+                // only when a row of the measured chain is cantSplit; otherwise
+                // the ordinary row-split path places the table.
+                // S1522 (2026-09-24, opt-out OXI_S1038_SPLIT_DISABLE = old whole-chain
+                // test): the 785 gate on S1521 lost legal__0010437a (rows 0-2 keepNext,
+                // row 0 tblHeader) and technical__00549a8f (row 0 tblHeader, one line),
+                // where Word pushes the heading although no row is cantSplit. Faithful
+                // slice, 44 arms (rem 0..120 x {as-is, cantSplit, tblHeader, keepNext}
+                // on row 1, Word PDF): as-is keeps the heading with ONE line of row 1;
+                // cantSplit and tblHeader move it until the whole row fits (rem 96);
+                // keepNext moves it until the whole row AND the first line of row 2 fit
+                // (rem 108). So the height Word needs under the heading is: every
+                // keepNext row of the chain whole, then the row they keep with -- whole
+                // when it is cantSplit / tblHeader, else its first text line only.
+                let s1038_last = next_table.rows.get(s1248_chain_rows.max(1) - 1);
+                let s1038_locked_row = std::env::var_os("OXI_S1038_SPLIT_DISABLE").is_some()
+                    || s1038_last.map_or(true, |r| r.cant_split || r.header);
+                let s1038_need_h = if s1038_locked_row { first_row_h } else { s1522_first_line_h };
                 let s1038_row_orphan = std::env::var("OXI_S1038_DISABLE").is_err()
                     && (!self.doc_body_has_real_cjk
                                 || std::env::var("OXI_CJK_TABLE_KEEP_NEXT").ok().as_deref() == Some("1"))
@@ -12487,9 +12542,9 @@ cells={} pitch={:.2} text={:?}",
                                     // The heading's estimate includes space that
                                     // can fall below the last rendered line. Its
                                     // own estimated overflow does not guarantee a break.
-                                    && first_row_h > 0.0
-                                    && this_h + first_row_h > remaining + 0.5
-                                    && this_h + first_row_h <= content_height + 0.5;
+                                    && s1038_need_h > 0.0
+                                    && this_h + s1038_need_h > remaining + 0.5
+                                    && this_h + s1038_need_h <= content_height + 0.5;
                                 let table_follower_moves = if std::env::var_os("OXI_CJK_TABLE_FOLLOWER_PLACEMENT").is_some()
                                     && self.doc_body_has_real_cjk && current_splits
                                     && this_h <= remaining && remaining < content_height - 0.5
@@ -12525,8 +12580,8 @@ cells={} pitch={:.2} text={:?}",
                                         current_splits, both_fit_fresh,
                                         row_chain && fresh_one_page && current_splits && both_fit_fresh && this_h <= remaining);
                                     eprintln!(
-                                        "[KN635-TBL2] first_row_h={:.1} s1038={}",
-                                        first_row_h, s1038_row_orphan
+                                        "[KN635-TBL2] first_row_h={:.1} first_line_h={:.1} locked={} need_h={:.1} s1038={}",
+                                        first_row_h, s1522_first_line_h, s1038_locked_row, s1038_need_h, s1038_row_orphan
                                     );
                                 }
                                 if (row_chain
