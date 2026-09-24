@@ -40752,6 +40752,14 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
         let mut s740_pages_len: usize = pages.len();
         let mut s740_fn_pages: Vec<Vec<u32>> = vec![Vec::new()];
         let mut s740_pending_commit: Option<usize> = None;
+        // S1527 (2026-09-24): note ids a row SPLIT already placed on the page of
+        // their referencing line (see the split site); the row-end commit skips
+        // them so they are neither re-listed nor re-reserved on the next page.
+        let mut s1527_early: Vec<u32> = Vec::new();
+        // S1527: the table's entry page; `s740_fn_pages[k]` is the page k pages
+        // after it, so a continuation page can be addressed while the row is
+        // still being split (before the next row start syncs the list).
+        let s740_entry_pages: usize = pages.len();
 
         // Resolve column widths from grid_columns, cell widths, or equal split
         // S1003: thread is_nested so a DIRECT BODY autofit table waterfills all
@@ -41115,7 +41123,7 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
             // table-note reserve; the previous row's notes are committed to the
             // page the CURRENT row begins on (v1 approximation for split rows).
             if pages.len() != s740_pages_len {
-                for _ in s740_pages_len..pages.len() {
+                while s740_fn_pages.len() < pages.len() - s740_entry_pages + 1 {
                     s740_fn_pages.push(Vec::new());
                 }
                 s740_pages_len = pages.len();
@@ -41124,15 +41132,18 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
             }
             if let Some(rf) = row_footnotes {
                 if let Some(prev) = s740_pending_commit.take() {
-                    let (ids, h) = &rf[prev];
+                    let (ids_all, h_all) = &rf[prev];
+                    // S1527: leave out the ids the split already placed.
+                    let ids: Vec<u32> = ids_all.iter().copied().filter(|id| !s1527_early.contains(id)).collect();
+                    let h = if ids_all.is_empty() { 0.0 } else { *h_all * ids.len() as f32 / ids_all.len() as f32 };
                     if !ids.is_empty() {
                         if !s740_page_has_notes {
                             s740_reserve += fn_sep;
                             s740_page_has_notes = true;
                         }
-                        s740_reserve += *h;
+                        s740_reserve += h;
                         if let Some(last) = s740_fn_pages.last_mut() {
-                            for id in ids {
+                            for id in &ids {
                                 if !last.contains(id) {
                                     last.push(*id);
                                 }
@@ -42998,7 +43009,11 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                     elements: std::mem::take(current_elements),
                 });
                 page_bottom += std::mem::take(&mut first_page_fit_offset);
-                if row_footnotes.is_none() {
+                // S1527: the finished page's note reserve belongs to that page;
+                // the continuation page starts clean and S1527 subtracts only the
+                // notes whose referencing lines land on it (S740 v1 carried the
+                // entry page's reserve across every continuation page).
+                if row_footnotes.is_none() || std::env::var_os("OXI_S1527_DISABLE").is_none() {
                     page_bottom += std::mem::take(&mut s740_reserve);
                 }
                 page_bottom += advance_table_page_geometry(
@@ -50532,6 +50547,90 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                         }
                     }
                 }
+                // S1527 (2026-09-24, opt-out OXI_S1527_DISABLE): the notes referenced
+                // by the lines that STAY on a page occupy its bottom, so the row's
+                // later lines split above them. policies__0097185c: one row (the
+                // FSP eligibility cell) runs p4..p6 and references notes 4/5 in
+                // lines at the top of p5; Word draws both notes on p5 (separator
+                // at 630.7) and moves "e) Is living in housing" to p6. S740 v1
+                // commits a row's notes where the NEXT row begins, so Oxi drew
+                // them on p6 and kept two more lines on p5. A ref whose line would
+                // itself fall below the shrunk bottom keeps v1 (it travels with
+                // its line). Per-note height is the row total shared equally.
+                // Cell text elements carry no run_index; the paragraph's first
+                // line stands for the ref's line (every corpus ref sits in its
+                // paragraph's first line). Applied at the first split here and
+                // at every continuation page in the loop below.
+                let s1527_on = std::env::var_os("OXI_S1527_DISABLE").is_none();
+                let (s1527_refs, s1527_share): (Vec<(usize, usize, u32)>, f32) = match row_footnotes {
+                    Some(rf) if s1527_on && !rf[row_idx].0.is_empty() => {
+                        let (ids_all, h_all) = &rf[row_idx];
+                        let mut refs = Vec::new();
+                        for (ci, cell) in row.cells.iter().enumerate() {
+                            let mut pi = 0usize;
+                            for b in &cell.blocks {
+                                if let Block::Paragraph(p) = b {
+                                    for r in &p.runs {
+                                        if let Some(id) = r.footnote_ref {
+                                            refs.push((ci, pi, id));
+                                        }
+                                    }
+                                    pi += 1;
+                                }
+                            }
+                        }
+                        (refs, *h_all / ids_all.len() as f32)
+                    }
+                    _ => (Vec::new(), 0.0),
+                };
+                // (bottom, page_has_notes, elements, already placed) -> (new bottom, kept ids)
+                let s1527_reserve = |bottom: f32, has_notes: bool, els: &[LayoutElement], early: &[u32]| -> (f32, Vec<u32>) {
+                    let mut bottom = bottom;
+                    let mut kept: Vec<u32> = Vec::new();
+                    for &(ci, pi, id) in &s1527_refs {
+                        if early.contains(&id) || kept.contains(&id) {
+                            continue;
+                        }
+                        let y = els
+                            .iter()
+                            .filter(|e| e.cell_col_index == Some(ci)
+                                && e.cell_paragraph_index == Some(pi)
+                                && matches!(e.content, LayoutContent::Text { .. }))
+                            .map(|e| e.y)
+                            .fold(f32::INFINITY, f32::min);
+                        if !y.is_finite() {
+                            continue;
+                        }
+                        let sep = if kept.is_empty() && !has_notes { fn_sep } else { 0.0 };
+                        if y + 0.5 < bottom - s1527_share - sep {
+                            bottom -= s1527_share + sep;
+                            kept.push(id);
+                        }
+                    }
+                    (bottom, kept)
+                };
+                let fragment_content_bottom = if !s1527_refs.is_empty() {
+                    let (bottom, kept) = s1527_reserve(fragment_content_bottom, s740_page_has_notes, &row_elements, &s1527_early);
+                    if !kept.is_empty() {
+                        if std::env::var("OXI_DBG_SPLIT").is_ok() {
+                            eprintln!("[SPLIT-S1527] row={} kept_notes={:?} bottom {:.2} -> {:.2}", row_idx, kept, fragment_content_bottom, bottom);
+                        }
+                        s740_page_has_notes = true;
+                        let off = pages.len() - s740_entry_pages;
+                        while s740_fn_pages.len() <= off {
+                            s740_fn_pages.push(Vec::new());
+                        }
+                        for id in &kept {
+                            if !s740_fn_pages[off].contains(id) {
+                                s740_fn_pages[off].push(*id);
+                            }
+                        }
+                        s1527_early.extend(kept.iter().copied());
+                    }
+                    bottom
+                } else {
+                    fragment_content_bottom
+                };
                 // R7.70 (Day 37 session 58, 2026-05-15): pick the FIRST LRPB-marked
                 // element in document order (= cell-render order), not the min elem.y.
                 // ed025c row has 3 LRPB elements: (8) at y=761.5 (cell 0, correct
@@ -51304,12 +51403,27 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                             .first()
                             .and_then(|c| c.margins.as_ref().and_then(|m| m.bottom))
                             .unwrap_or(default_pad_b);
+                        // S1528 (2026-09-24, opt-out OXI_S1528_DISABLE): the tail
+                        // is the cell's RESOLVED space_after, i.e. after Word's
+                        // in-cell reset of inherited spacing, not the raw style
+                        // value. reports__00870bdf p32: every cell paragraph has a
+                        // direct `w:spacing w:line=276` and inherits docDefaults
+                        // after=200; between paragraphs Oxi already spaces 14.0
+                        // like Word, but the split row's continuation closed 10pt
+                        // below its last line (Word: MOSTI row at 172.6, Oxi
+                        // 182.6) and the whole page ran one line long.
                         let after_last = row
                             .cells
                             .iter()
                             .filter_map(|c| {
                                 c.blocks.iter().rev().find_map(|b| match b {
-                                    Block::Paragraph(p) => Some(p.style.space_after.unwrap_or(0.0)),
+                                    Block::Paragraph(p) => Some(
+                                        if std::env::var_os("OXI_S1528_DISABLE").is_none() {
+                                            self.cell_para_spacing(p, table.style.para_style.as_ref(), table_grid_pitch).1
+                                        } else {
+                                            p.style.space_after.unwrap_or(0.0)
+                                        },
+                                    ),
                                     _ => None,
                                 })
                             })
@@ -51624,7 +51738,11 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                 });
 
                 page_bottom += std::mem::take(&mut first_page_fit_offset);
-                if row_footnotes.is_none() {
+                // S1527: the finished page's note reserve belongs to that page;
+                // the continuation page starts clean and S1527 subtracts only the
+                // notes whose referencing lines land on it (S740 v1 carried the
+                // entry page's reserve across every continuation page).
+                if row_footnotes.is_none() || std::env::var_os("OXI_S1527_DISABLE").is_none() {
                     page_bottom += std::mem::take(&mut s740_reserve);
                 }
                 page_bottom += advance_table_page_geometry(
@@ -51760,6 +51878,29 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                     // is at least half full. Opt-out OXI_S565_DISABLE.
                     let s565_half_full = std::env::var("OXI_S565_DISABLE").is_ok()
                         || lrpb_next_split > page_top + content_height * 0.5;
+                    // S1527: notes referenced by the lines landing on THIS
+                    // continuation page shrink its bottom (see the first split).
+                    let continuation_bottom = if !s1527_refs.is_empty() {
+                        let (bottom, kept) = s1527_reserve(continuation_bottom, false, &remaining, &s1527_early);
+                        if !kept.is_empty() {
+                            if std::env::var("OXI_DBG_SPLIT").is_ok() {
+                                eprintln!("[SPLIT-S1527] row={} loop kept_notes={:?} bottom {:.2} -> {:.2}", row_idx, kept, continuation_bottom, bottom);
+                            }
+                            let off = pages.len() - s740_entry_pages;
+                            while s740_fn_pages.len() <= off {
+                                s740_fn_pages.push(Vec::new());
+                            }
+                            for id in &kept {
+                                if !s740_fn_pages[off].contains(id) {
+                                    s740_fn_pages[off].push(*id);
+                                }
+                            }
+                            s1527_early.extend(kept.iter().copied());
+                        }
+                        bottom
+                    } else {
+                        continuation_bottom
+                    };
                     let next_split = if lrpb_next_split.is_finite()
                         && lrpb_next_split < continuation_bottom
                         && s565_half_full
@@ -52001,7 +52142,11 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                         elements: this_page,
                     });
                     page_bottom += std::mem::take(&mut first_page_fit_offset);
-                if row_footnotes.is_none() {
+                // S1527: the finished page's note reserve belongs to that page;
+                // the continuation page starts clean and S1527 subtracts only the
+                // notes whose referencing lines land on it (S740 v1 carried the
+                // entry page's reserve across every continuation page).
+                if row_footnotes.is_none() || std::env::var_os("OXI_S1527_DISABLE").is_none() {
                     page_bottom += std::mem::take(&mut s740_reserve);
                 }
                 page_bottom += advance_table_page_geometry(
@@ -52788,22 +52933,25 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
         // then hand the per-page ids to the caller.
         if let Some(rf) = row_footnotes {
             if pages.len() != s740_pages_len {
-                for _ in s740_pages_len..pages.len() {
+                while s740_fn_pages.len() < pages.len() - s740_entry_pages + 1 {
                     s740_fn_pages.push(Vec::new());
                 }
                 s740_reserve = 0.0;
                 s740_page_has_notes = false;
             }
             if let Some(prev) = s740_pending_commit.take() {
-                let (ids, h) = &rf[prev];
+                let (ids_all, h_all) = &rf[prev];
+                // S1527: leave out the ids the split already placed.
+                let ids: Vec<u32> = ids_all.iter().copied().filter(|id| !s1527_early.contains(id)).collect();
+                let h = if ids_all.is_empty() { 0.0 } else { *h_all * ids.len() as f32 / ids_all.len() as f32 };
                 if !ids.is_empty() {
                     if !s740_page_has_notes {
                         s740_reserve += fn_sep;
                         s740_page_has_notes = true;
                     }
-                    s740_reserve += *h;
+                    s740_reserve += h;
                     if let Some(last) = s740_fn_pages.last_mut() {
-                        for id in ids {
+                        for id in &ids {
                             if !last.contains(id) {
                                 last.push(*id);
                             }
