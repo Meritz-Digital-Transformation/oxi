@@ -197,6 +197,26 @@ pub fn parse_styles(xml: &str, theme: &ThemeColors) -> Result<StyleSheet, ParseE
         }
     }
 
+    // S1561 (2026-09-26, default ON, opt-out OXI_S1561_DISABLE): a style sheet
+    // that marks no paragraph style w:default="1" still has a default -- Word
+    // uses "Normal" (by styleId, else by name). reference__009644b1 (generated
+    // docx, 23 styles, none default): every paragraph without pStyle and every
+    // rStyle=row-content run (no rPr, basedOn Normal) rendered in the engine's
+    // Calibri 10 instead of Normal's Segoe UI 11 (Word PDF: SegoeUI 11.04), the
+    // table cells wrapped one line less each and page 2 came out ~55pt short.
+    if styles.default_paragraph_style_id.is_none()
+        && std::env::var_os("OXI_S1561_DISABLE").is_none()
+    {
+        let by_id = styles.styles.get("Normal").map(|_| "Normal".to_string());
+        let by_name = by_id.clone().or_else(|| {
+            styles
+                .styles
+                .iter()
+                .find(|(_, d)| d.display_name.as_deref().map_or(false, |n| n.eq_ignore_ascii_case("Normal")))
+                .map(|(id, _)| id.clone())
+        });
+        styles.default_paragraph_style_id = by_name;
+    }
     // Resolve basedOn inheritance chains
     resolve_style_inheritance(&mut styles);
 

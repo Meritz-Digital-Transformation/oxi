@@ -4602,7 +4602,23 @@ impl LayoutEngine {
             && std::env::var("OXI_S1036_DISABLE").is_err()
             && self.resolve_font_family(run_style, para_style) == Some("Arial Unicode MS")
         {
-            "Arial Unicode MS Latin"
+            // S1564 (2026-09-26, default ON, opt-out OXI_S1564_DISABLE): with
+            // Arial Unicode MS absent from the machine (it is not in the Fonts
+            // registry here) Word draws the run with its substitute and sizes
+            // the line by the SUBSTITUTE's box, not by AUM's 1.742 hhea.
+            // MEASURED three ways: reference__0095cfe5's «Cut ≈67%» line (AUM run,
+            // Word PDF Arial-BoldMT, pitch 12.72 on both sides -- Oxi gave it
+            // 19.2 and pushed a bullet to p3); policies__0021ede1's own TOC page
+            // (the S1036 evidence document) has no AUM font in its Word PDF
+            // either, ArialMT 9 throughout at a 10.4 pitch; and `aum_probe.py`
+            // (Arial 11 body, AUM run '≈'/'A', COM Info(6)): 12.0 / 12.75 = the
+            // Arial control's 12.75, while MS Mincho (14.25) and Meiryo (21.75)
+            // runs do grow the line. The substitute is Arial (PDF face name).
+            if std::env::var_os("OXI_S1564_DISABLE").is_none() {
+                "Arial"
+            } else {
+                "Arial Unicode MS Latin"
+            }
         } else {
             family
         }
@@ -15576,6 +15592,10 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                                 .map(|c| (c.top, c.right, c.bottom, c.left)),
                         },
                     ));
+                    if std::env::var_os("OXI_DBG_IMGADV").is_some() {
+                        eprintln!("[IMGADV] cy={:.2} img_h={:.2} img_w={:.2} adv={:.2} before={:.2} after={:.2} host_exact={:?}",
+                            cursor.cursor_y, img.height, img.width, img_adv, img.paragraph_space_before, img.paragraph_space_after, img.host_exact_line);
+                    }
                     cursor.advance(img_adv);
                     if s1181_img_unsnap != 0.0 {
                         cursor.advance_split(0.0, s1181_img_unsnap);
@@ -20621,6 +20641,11 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
         // Spacing collapse: max(prev_sa, cur_sb) instead of prev_sa + cur_sb.
         // prev_space_after was NOT added to cursor_y by the caller.
         let collapsed_spacing = space_before.max(prev_space_after);
+        if std::env::var_os("OXI_DBG_SPACING").is_some() {
+            let head: String = para.runs.iter().flat_map(|r| r.text.chars()).take(24).collect();
+            eprintln!("[SPACING] cy={:.2} before={:.2} prev_after={:.2} collapsed={:.2} bi={:?} «{}»",
+                cursor_y, space_before, prev_space_after, collapsed_spacing, body_para_index, head);
+        }
 
         // Contextual spacing: suppress each paragraph's OWN spacing contribution
         // when it has contextualSpacing=true AND the neighbors share the same
@@ -33790,8 +33815,17 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                             // Latin (!doc_body_has_real_cjk); the hanging+literal-tab
                             // pattern is 0/1439 golden-test + 0 docx_corpus/ja → JP
                             // byte-identical by construction.
+                            // S1560 (2026-09-26, default ON, opt-out OXI_S1560_DISABLE): the
+                            // implied stop is not Latin-only. legal__09904427 p2 (JA, TOC 1
+                            // style: ind left=310 hanging=310, one right dot-leader stop at
+                            // 9072): 「1.⇥臨床研究の名称…⇥2」 -- Word tabs the title to the
+                            // hanging position 15.5pt (PDF: continuation lines at 77.9 =
+                            // 62.4 + 15.5, one line per entry); Oxi jumped the first tab
+                            // to the right stop, drew the leader after 「1.」 and wrapped
+                            // the title to a second line.
                             let s881 = std::env::var("OXI_S881_DISABLE").is_err()
-                                && !self.doc_body_has_real_cjk
+                                && (!self.doc_body_has_real_cjk
+                                    || std::env::var_os("OXI_S1560_DISABLE").is_none())
                                 && first_line_indent < -0.01;
                             let line_start_abs = indent_left;
                             let abs_pos = current_width + line_start_abs;
@@ -48092,6 +48126,21 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                             // last row of its floating table missed page 2 by 1.4pt.
                                             let s1382 = std::env::var("OXI_S1382_DISABLE").is_err()
                                                 && !self.doc_body_has_real_cjk;
+                                            // S1559 (2026-09-26, default ON, opt-out OXI_S1559_DISABLE):
+                                            // an auto MULTIPLE keeps the ascii face as well -- the
+                                            // estimate (S943) already priced hhea x factor, only this
+                                            // consumer fell back to the eastAsia box when the factor
+                                            // was not 1.0. MEASURED (_pb_emptymult_face_gen.py, 24
+                                            // arms, COM Info(6), body and cell): an empty Arial-12
+                                            // mark at line 240/276/360/480 = 13.5/15.75/21.0/27.75
+                                            // (= 13.8 x factor, 0.75-quantised), Arial 10 and
+                                            // Calibri 11 alike, with or without eastAsia=MS Mincho.
+                                            // legal__0030f893 p3: six such empties (Arial 12/11,
+                                            // line 360) in a cell at 23.35/21.4 (Mincho 83/64 x 1.5)
+                                            // against Word's 21.0/18.75 -> +14pt, and the page's last
+                                            // three-line paragraph moved to p4.
+                                            let s1559_mult = std::env::var_os("OXI_S1559_DISABLE").is_none()
+                                                && effective_line_spacing.map_or(false, |f| f > 0.0);
                                             let s989_ascii = std::env::var("OXI_S989_DISABLE")
                                                 .is_err()
                                                 && (!self.doc_body_has_real_cjk || s1376_mark)
@@ -48099,8 +48148,8 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                                     effective_line_rule,
                                                     None | Some("auto")
                                                 )
-                                                && effective_line_spacing
-                                                    .map_or(true, |f| (f - 1.0).abs() <= 0.01)
+                                                && (s1559_mult || effective_line_spacing
+                                                    .map_or(true, |f| (f - 1.0).abs() <= 0.01))
                                                 // S1512 (2026-09-21, default ON, opt-out OXI_S1512_DISABLE):
                                                 // a mark whose ascii face comes only from the
                                                 // docDefaults theme (no rFonts on the mark) is
@@ -50898,8 +50947,28 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
             // Row splitting across pages: when the row content extends beyond
             // the current page bottom, split elements between current and next page.
             // This handles single-cell rows with many paragraphs (e.g. list boxes).
+            // S1565 (2026-09-26, default ON, opt-out OXI_S1565_DISABLE): a split
+            // fragment in a Latin document whose table has no table-level border
+            // but whose cells declare a BOTTOM border still closes with that rule
+            // -- the row-bottom law (rowfoot_pdf: boundary + bw/2 <= body bottom)
+            // applied to the fragment. educational__00116bbe p16: a 7-line TNR-12
+            // (x1.15) cell paragraph whose cell has tcBorders bottom sz=18 (2.25pt,
+            // white); Word PDF keeps 6 lines (last baseline 764.26) and starts p17
+            // with the 7th, although the 7th's box ends at 784.4 on a 785.2 page:
+            // 784.4 + 1.125 > 785.2. Oxi cut at 784.79 and kept all seven, which
+            // S1559's correct empty-line height then exposed (the 2pt-too-tall
+            // empty above had been pushing the line off by itself).
+            let s1565_cell_bottom = std::env::var_os("OXI_S1565_DISABLE").is_none()
+                && !separate_outer_edges
+                && !self.doc_body_has_real_cjk
+                && self.s1188_on()
+                && !table.style.border
+                && row.cells.iter().any(|c| c.borders.as_ref().and_then(|b| b.bottom.as_ref())
+                    .map_or(false, |d| d.style != "nil" && d.style != "none"));
             let fragment_bottom_width = if separate_outer_edges {
                 self.table_fragment_bottom_width(table, Some(row))
+            } else if s1565_cell_bottom {
+                self.table_fragment_bottom_width(table, Some(row)) * 0.5
             } else { 0.0 };
             let fragment_top_width = if separate_outer_edges {
                 self.table_fragment_top_width(table, row)
