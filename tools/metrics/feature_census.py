@@ -53,6 +53,8 @@ def census(path):
         "pgsz_absent": int('<w:pgSz' not in d),
         # S1541: formula fields (instrText starting with '=')
         "formula_fields": len(re.findall(r'<w:instrText[^>]*>\s*=', d)),
+        # S1544: paragraphs that switch keepLines OFF directly (val 0/false/off)
+        "keeplines_off": len(re.findall(r'<w:keepLines w:val="(?:0|false|off)"', d)),
         # S1539: runs with a character scale (w:w) other than 100
         "w_scale": sum(1 for v in re.findall(r'<w:w w:val="(\d+)"', d) if v != "100"),
         "line_pitch": (lambda m: int(m.group(1)) if m else 0)(re.search(r'<w:docGrid[^>]*w:linePitch="(\d+)"', d)),

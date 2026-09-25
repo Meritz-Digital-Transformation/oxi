@@ -11392,6 +11392,24 @@ cells={} pitch={:.2} text={:?}",
                                 this_h0
                             };
                             let remaining = (start_y + effective_content_h) - cursor.cursor_y;
+                            // S1545 (2026-09-25, opt-out OXI_S1545_DISABLE): the pair test
+                            // measured `remaining` from the raw cursor, but the heading is
+                            // placed AFTER the wrap band of an anchored figure (the keepLines
+                            // trial above already advances by `trial_wrap_advance`).
+                            // policies__0016b30b0d5ab632 p3: decision at 652.1 (rem 81.5),
+                            // heading placed at 688.7 (rem 44.9) below a wrapSquare chart;
+                            // heading + 2 follower lines no longer fit, Word moves the
+                            // heading to p4 with its paragraph, Oxi left it alone at the
+                            // page bottom.
+                            let remaining = if std::env::var_os("OXI_S1545_DISABLE").is_none() {
+                                let (_, _, kn_wrap_advance) = self.body_paragraph_wrap_bands(
+                                    para, page, &s758_bands, current_page_idx,
+                                    cursor.cursor_y, start_x, content_width,
+                                );
+                                remaining - kn_wrap_advance.max(0.0)
+                            } else {
+                                remaining
+                            };
                             // S635: a keepNext heading is pushed WITH its follower when the
                             // follower would move WHOLLY to the next page. A ≤3-line para
                             // can't split (any break leaves <2 lines on one side =

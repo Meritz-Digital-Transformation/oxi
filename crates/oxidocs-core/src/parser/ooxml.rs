@@ -3978,7 +3978,14 @@ fn parse_paragraph_with_inline_images_impl(
             } else if ds.keep_next {
                 style.keep_next = true;
             }
-            if ds.keep_lines {
+            // S1544 (2026-09-25): a DIRECT `<w:keepLines w:val="0"/>` wins over
+            // the style's keepLines, as keepNext already does above (S782
+            // class: the merge clobbered the explicit OFF back to true).
+            // reports__0079718f484bb08c: Normal carries keepLines, the
+            // ListParagraph bullets carry keepLines val=0; Word splits a 7-line
+            // bullet 5/2 across p23/p24 (PDF), Oxi kept it whole and moved it,
+            // +8 pages over the document.
+            if !style.has_explicit_keep_lines && ds.keep_lines {
                 style.keep_lines = true;
             }
             // S782 (2026-07-11): a DIRECT `<w:contextualSpacing w:val="0"/>`
@@ -13151,7 +13158,8 @@ fn empty_para_with_defaults(styles: &StyleSheet) -> Paragraph {
         } else if ds.keep_next {
             style.keep_next = true;
         }
-        if ds.keep_lines {
+        // S1544: see the paragraph merge above.
+        if !style.has_explicit_keep_lines && ds.keep_lines {
             style.keep_lines = true;
         }
     }
