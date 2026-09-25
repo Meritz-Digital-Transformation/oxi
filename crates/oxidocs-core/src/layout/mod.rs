@@ -2268,6 +2268,10 @@ pub struct LayoutElement {
     pub vmerge_restart_overflow_to_next_page: bool,
     /// Absolute destination page for explicitly paginated vertical-merge text.
     pub vmerge_destination_page: Option<usize>,
+    /// S1555: a cell float positioned relative to the page MARGIN (not to a
+    /// paragraph). It is not row content: the row split must not treat it as
+    /// an image straddling the split point.
+    pub margin_float: bool,
     /// Identity and ordinal retained while a merged cell's fragments reflow.
     pub vmerge_flow_element: Option<(std::sync::Arc<()>, usize)>,
     /// Session 72 Phase A (2026-05-17): vertical offset from LINE BOX TOP
@@ -2353,6 +2357,7 @@ impl LayoutElement {
             is_paragraph_start_with_lrpb: false,
             vmerge_restart_overflow_to_next_page: false,
             vmerge_destination_page: None,
+            margin_float: false,
             vmerge_flow_element: None,
             text_y_off: 0.0,
             baseline_offset: None,
@@ -2394,6 +2399,7 @@ impl LayoutElement {
             is_paragraph_start_with_lrpb: false,
             vmerge_restart_overflow_to_next_page: false,
             vmerge_destination_page: None,
+            margin_float: false,
             vmerge_flow_element: None,
             text_y_off: 0.0,
             baseline_offset: None,
@@ -50022,7 +50028,15 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                 element.flow_line_height = Some(0.0);
                                 // A positioned cell image stays with its reference origin.
                                 // Preserve its painted offset when the span moves to a new page.
-                                let origin = if img.position.as_ref().map_or(false, |p| p.v_relative.as_deref() == Some("margin")) {
+                                let is_margin_rel = img.position.as_ref().map_or(false, |p| p.v_relative.as_deref() == Some("margin"));
+                                element.margin_float = is_margin_rel;
+                                // S1555: remember the anchor paragraph (cell-local block
+                                // index) so the row split can ask whether it sits in the
+                                // first fragment.
+                                if is_margin_rel {
+                                    element.cell_paragraph_index = Some(img.anchor_block_index);
+                                }
+                                let origin = if is_margin_rel {
                                     0.0
                                 } else {
                                     float_tops.get(img.anchor_block_index).copied().unwrap_or(0.0)
@@ -51081,12 +51095,51 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                 let row_top = cursor.cursor_y;
                 let split_y = if s1168 {
                     let mut cand = split_y;
+                    if std::env::var("OXI_DBG_SPLIT").is_ok() {
+                        for e in row_elements.iter().filter(|e| matches!(e.content, LayoutContent::Image { .. })) {
+                            eprintln!("[SPLIT-S1168-IMG] y={:.2} h={:.2} off={:.2} fit={:?} top={:.2} row_top={:.2} cand={:.2} margin={}",
+                                e.y, e.height, e.flow_line_offset, e.content_fit_height, e.y - e.flow_line_offset, row_top, cand, e.margin_float);
+                        }
+                    }
                     loop {
                         let crossed = row_elements
                             .iter()
                             .filter(|e| matches!(e.content, LayoutContent::Image { .. })
                                 || (std::env::var_os("OXI_EMPTY_CELL_LINE_SPLIT").is_some()
                                     && matches!(&e.content, LayoutContent::Text { text, .. } if text.is_empty())))
+                            // S1555 (2026-09-25, default ON, opt-out OXI_S1555_DISABLE): a
+                            // MARGIN-relative cell float (cell_float_flow gives it origin 0,
+                            // so flow_line_offset = its absolute y) is not row content: its
+                            // computed span 0..y+h "crosses" every candidate and the split
+                            // collapsed to the row top (correspondence__101d483d: a 1-row
+                            // 8-paragraph table with 7 margin-anchored photos left page 2
+                            // empty; Word splits the row with three paragraphs on it).
+                            // OPT-IN (OXI_S1555=1) until the Word probe decides: with it ON
+                            // correspondence__101d483d 0.9123->0.9649 but forms__005a5d91 and
+                            // educational__00161422 PASS->FAIL (their cell floats straddle the
+                            // page bottom the same way and Word moves the row). All three
+                            // are layoutInCell=1, so that attribute is not the discriminator.
+                            // S1555 v2 (2026-09-25, default ON, opt-out OXI_S1555_DISABLE): a
+                            // cell-relative (margin) float counts as a straddling image only
+                            // when its ANCHOR paragraph's line lies in the first fragment
+                            // (above the candidate split). Word probe cellfloat_split (18
+                            // arms): a picture straddling the page bottom moves the whole
+                            // row (compat 14) / splits the row after the anchor line
+                            // (compat 15) — but correspondence__101d483d's straddling photo
+                            // is anchored to a paragraph that begins below the split, so
+                            // Word splits the row by its text and the photo follows its
+                            // paragraph. Oxi moved the split to the row top (+1 page).
+                            .filter(|e| std::env::var_os("OXI_S1555_DISABLE").is_some()
+                                || !e.margin_float
+                                || e.cell_paragraph_index.map_or(true, |ap| {
+                                    row_elements.iter()
+                                        .filter(|t| matches!(t.content, LayoutContent::Text { .. })
+                                            && t.cell_col_index == e.cell_col_index
+                                            && t.cell_paragraph_index == Some(ap))
+                                        .map(|t| t.y)
+                                        .fold(f32::INFINITY, f32::min)
+                                        < cand - 0.1
+                                }))
                             .filter(|e| e.y - e.flow_line_offset < cand - 0.1
                                 && e.y - e.flow_line_offset
                                     + e.content_fit_height.unwrap_or(e.height + e.flow_line_offset)
