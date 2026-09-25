@@ -177,6 +177,38 @@ def aggregate_dump(dump: dict) -> dict:
         # Sort within page by Y, then X (reading order)
         records.sort(key=lambda r: (r["y"], r["x"]))
         out[str(page_num)] = records
+    # 2026-09-26: a body paragraph that carries a page break INSIDE it
+    # (`<w:t>    </w:t><w:br w:type="page"/><w:t>DESCRIPTION…</w:t>`,
+    # educational__004cf6e9 pi=13) yields one whitespace-only record on the
+    # page where it starts and one with its text on the next page. Word's
+    # truth (Information(3) at the collapsed start) is the START page, and
+    # the text-prefix matcher can only find the second record, so the doc
+    # read as +1 although both engines start the paragraph on the same
+    # page. Fold the continuation's text into the whitespace-only opener
+    # and drop the continuation record.
+    # The opener must be NON-EMPTY whitespace (the spaces before the break)
+    # and the continuation must be the first record of the next page: para_idx
+    # is a per-section block index, so an EMPTY paragraph ending one section's
+    # last page shares its index with an unrelated paragraph of the next
+    # section (technical__c6d7cdb1 / policies__0c94a7bc read -1 x 2..16 when
+    # the empty opener was folded).
+    pages_sorted = sorted(out.keys(), key=int)
+    for a, b in zip(pages_sorted, pages_sorted[1:]):
+        nxt = out[b]
+        if not nxt:
+            continue
+        top_y = min(r["y"] for r in nxt)
+        for rec in out[a]:
+            if rec["para_idx"] is None or rec["cell_para_idx"] is not None or rec["cell_row_idx"] is not None:
+                continue
+            if not rec["text"] or rec["text"].replace("　", " ").strip():
+                continue
+            for j, cont in enumerate(nxt):
+                if (cont["para_idx"] == rec["para_idx"] and cont["cell_para_idx"] is None and cont["cell_row_idx"] is None
+                        and cont["text"].strip() and cont["y"] <= top_y + 0.01):
+                    rec["text"] = (rec["text"] + cont["text"])[:30]
+                    del nxt[j]
+                    break
     return out
 
 
