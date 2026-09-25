@@ -26138,6 +26138,24 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
             // Word's p12 (today's truth), Oxi kept line 0 on p11.
             let s1332_exact = para.style.line_spacing_rule.as_deref() == Some("exact")
                 && std::env::var("OXI_S1332_DISABLE").is_err();
+            // S1558 (2026-09-26, default ON, opt-out OXI_S1558_DISABLE): on a typed
+            // grid the per-line page-bottom test is S739's centred box,
+            // (box + natural) / 2, for every line (S1155). The widow / orphan
+            // look-ahead measured the same last line by S608's natural height,
+            // 1.25pt shorter on an 18pt pitch, so a 2-line widowControl paragraph
+            // "fit" in the look-ahead and was then split 1+1 by the per-line
+            // test -- an orphan Word never leaves (the S1096 shape, on a grid).
+            // policies__1db396de p43: 「関係機関の窓口へのリーフレット…」 (2 lines,
+            // HG丸ｺﾞｼｯｸM-PRO 12, lines 360, widowControl) at 736.9 on a 771.0
+            // bottom: 736.9 + 18 + 15.5 = 770.4 fit the look-ahead, 754.9 + 16.75
+            // = 771.65 broke the line; the Word PDF puts both lines at the top
+            // of p44. Same predicate as s739_centered (S1153 on-slot gate off).
+            let s1558_centered = std::env::var_os("OXI_S1558_DISABLE").is_none()
+                && std::env::var("OXI_S739_DISABLE").is_err()
+                && !s1375_before_section_end
+                && !page.doc_grid_no_type
+                && para.style.snap_to_grid
+                && grid_pitch.map_or(false, |p| p > 0.0);
             let last_line_fit_h = |idx: usize| -> f32 {
                 let full = line_heights.get(idx).copied().unwrap_or(0.0);
                 // With precise Latin margins, widow and orphan look-ahead
@@ -26153,6 +26171,11 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                 if centered_multicell_grid {
                     let natural = natural_line_heights.get(idx).copied().unwrap_or(full).min(full);
                     return (full + natural) / 2.0;
+                }
+                if s1558_centered {
+                    // S1558: the same centred box the per-line test will apply.
+                    let natural = natural_line_heights.get(idx).copied().unwrap_or(full).min(full);
+                    return ((full + natural) / 2.0).max(natural).min(full);
                 }
                 if no_type_multiple_ink {
                     // S1079: natural (unmultiplied) line, not the ink box.
