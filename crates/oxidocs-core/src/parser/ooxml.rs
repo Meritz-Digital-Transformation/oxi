@@ -867,6 +867,19 @@ impl OoxmlParser {
                     section.properties.header_distance,
                     section.properties.footer_distance,
                 ));
+                // S1553: this continuous section's own (or inherited) header/
+                // footer set, parallel to vertical_runs.
+                last.header_runs.push(crate::ir::HeaderFooterRun {
+                    block_start: last.blocks.len(),
+                    header: header.clone(),
+                    footer: footer.clone(),
+                    header_first: header_first.clone(),
+                    footer_first: footer_first.clone(),
+                    header_even: header_even.clone(),
+                    footer_even: footer_even.clone(),
+                    title_pg: section.properties.title_pg,
+                    even_odd_hf,
+                });
                 // S735: parallel per-section grid pitch run.
                 last.grid_runs
                     .push((last.blocks.len(), section.properties.grid_line_pitch));
@@ -985,6 +998,18 @@ impl OoxmlParser {
                     section.properties.header_distance,
                     section.properties.footer_distance,
                 )];
+                // S1553: seed the header-run list with this (first) section's set.
+                let header_runs = vec![crate::ir::HeaderFooterRun {
+                    block_start: 0,
+                    header: header.clone(),
+                    footer: footer.clone(),
+                    header_first: header_first.clone(),
+                    footer_first: footer_first.clone(),
+                    header_even: header_even.clone(),
+                    footer_even: footer_even.clone(),
+                    title_pg: section.properties.title_pg,
+                    even_odd_hf,
+                }];
                 // S735: seed the grid-run list with the first section's pitch.
                 let grid_runs = vec![(0usize, section.properties.grid_line_pitch)];
                 let grid_char_runs = vec![(0usize, section.properties.grid_char_space_raw)];
@@ -1023,6 +1048,7 @@ impl OoxmlParser {
                     dropped_pgnum_restart: false,
                     margin_runs,
                     vertical_runs,
+                    header_runs,
                     grid_runs,
                     grid_char_runs,
                     grid_char_quantized_runs: vec![(0, section.properties.doc_grid_lines_and_chars.then_some(section.properties.grid_char_quantized))],

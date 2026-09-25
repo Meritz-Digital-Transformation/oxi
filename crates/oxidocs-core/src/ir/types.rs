@@ -105,6 +105,29 @@ pub struct Document {
     pub keep_floating_tables_together: bool,
 }
 
+/// S1553: one merged continuous section's header/footer set (see
+/// `Page::header_runs`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HeaderFooterRun {
+    pub block_start: usize,
+    #[serde(default)]
+    pub header: Vec<Block>,
+    #[serde(default)]
+    pub footer: Vec<Block>,
+    #[serde(default)]
+    pub header_first: Vec<Block>,
+    #[serde(default)]
+    pub footer_first: Vec<Block>,
+    #[serde(default)]
+    pub header_even: Vec<Block>,
+    #[serde(default)]
+    pub footer_even: Vec<Block>,
+    #[serde(default)]
+    pub title_pg: bool,
+    #[serde(default)]
+    pub even_odd_hf: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Page {
     pub blocks: Vec<Block>,
@@ -249,6 +272,17 @@ pub struct Page {
     /// its blocks continue at the current cursor on the boundary page.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vertical_runs: Vec<(usize, f32, f32, Option<f32>, Option<f32>)>,
+    /// S1553 (2026-09-25): per-section header/footer sets for merged
+    /// continuous sections, parallel to `vertical_runs` (seeded at block 0,
+    /// pushed at the same merge site). A continuous section with its own
+    /// headerReference/footerReference governs the pages that BEGIN in it:
+    /// their body start (header push) and the drawn header/footer come from
+    /// this set, not from the page-level fields (which are the first
+    /// section's). reports__0079718f p93: the ACARA title section's headers
+    /// are one empty line, the page-level ones two lines + a table -> Oxi
+    /// pushed the body 9.8pt and paid a blank page.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub header_runs: Vec<HeaderFooterRun>,
     /// S735 (2026-07-03): per-section docGrid line pitch for merged continuous
     /// sections — (block_start_index, grid_line_pitch). The merged Page kept
     /// only the first section's pitch (probezcontgrid: pitch 360→480 change at

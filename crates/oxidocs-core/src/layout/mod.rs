@@ -7461,12 +7461,29 @@ cells={} pitch={:.2} text={:?}",
             if std::env::var("OXI_S863_DISABLE").is_err() && page.vertical_runs.len() > 1 {
                 page.vertical_runs
                     .iter()
-                    .map(|(_, top, bottom, hd, fd)| {
+                    .enumerate()
+                    .map(|(ri, (_, top, bottom, hd, fd))| {
                         let mut rp = page.clone();
                         rp.margin.top = *top;
                         rp.margin.bottom = *bottom;
                         rp.header_distance = *hd;
                         rp.footer_distance = *fd;
+                        // S1553 (2026-09-25, default ON, opt-out OXI_S1553_DISABLE):
+                        // a merged continuous section's pages take the header/
+                        // footer set that section carries, not the first
+                        // section's (see Page::header_runs).
+                        if std::env::var_os("OXI_S1553_DISABLE").is_none() {
+                            if let Some(hr) = page.header_runs.get(ri) {
+                                rp.header = hr.header.clone();
+                                rp.footer = hr.footer.clone();
+                                rp.header_first = hr.header_first.clone();
+                                rp.footer_first = hr.footer_first.clone();
+                                rp.header_even = hr.header_even.clone();
+                                rp.footer_even = hr.footer_even.clone();
+                                rp.title_pg = hr.title_pg;
+                                rp.even_odd_hf = hr.even_odd_hf;
+                            }
+                        }
                         let geom = |hdr: &[Block], ftr: &[Block]| {
                             let sy = rp.body_start_y(self.s755_header_bottom(hdr, &rp), self.s1381_header_band(hdr, &rp));
                             let (mut fr, _) = self.s755_footer_geom(ftr, &rp);
@@ -16449,19 +16466,35 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
             // pages render the EVEN-type blocks (blank when the flag is set
             // but no reference exists), everything else the default.
             let s755_pno = page_idx + 1;
-            let hdr_blocks: &[Block] = if s755_on && page.title_pg && s755_pno == 1 {
-                &page.header_first
-            } else if s755_on && page.even_odd_hf && (first_logical as usize + page_idx) % 2 == 0 {
-                &page.header_even
+            // S1553: the header/footer set of the merged continuous section in
+            // which this physical page BEGINS (its lowest block index).
+            let s1553_run = if std::env::var_os("OXI_S1553_DISABLE").is_none()
+                && page.header_runs.len() > 1
+            {
+                lp.elements.iter().filter_map(|e| e.paragraph_index).min()
+                    .and_then(|b| page.header_runs.iter().rposition(|r| r.block_start <= b))
+                    .map(|i| &page.header_runs[i])
             } else {
-                &page.header
+                None
             };
-            let ftr_blocks: &[Block] = if s755_on && page.title_pg && s755_pno == 1 {
-                &page.footer_first
-            } else if s755_on && page.even_odd_hf && (first_logical as usize + page_idx) % 2 == 0 {
-                &page.footer_even
+            let (hs_hdr, hs_hdr_first, hs_hdr_even, hs_ftr, hs_ftr_first, hs_ftr_even, hs_title_pg, hs_even_odd):
+                (&[Block], &[Block], &[Block], &[Block], &[Block], &[Block], bool, bool) = match s1553_run {
+                Some(r) => (&r.header, &r.header_first, &r.header_even, &r.footer, &r.footer_first, &r.footer_even, r.title_pg, r.even_odd_hf),
+                None => (&page.header, &page.header_first, &page.header_even, &page.footer, &page.footer_first, &page.footer_even, page.title_pg, page.even_odd_hf),
+            };
+            let hdr_blocks: &[Block] = if s755_on && hs_title_pg && s755_pno == 1 {
+                hs_hdr_first
+            } else if s755_on && hs_even_odd && (first_logical as usize + page_idx) % 2 == 0 {
+                hs_hdr_even
             } else {
-                &page.footer
+                hs_hdr
+            };
+            let ftr_blocks: &[Block] = if s755_on && hs_title_pg && s755_pno == 1 {
+                hs_ftr_first
+            } else if s755_on && hs_even_odd && (first_logical as usize + page_idx) % 2 == 0 {
+                hs_ftr_even
+            } else {
+                hs_ftr
             };
             // S1174: draw the page's re-resolved STYLEREF text. Pages that
             // began mid-paragraph carry no snapshot — use the nearest earlier
