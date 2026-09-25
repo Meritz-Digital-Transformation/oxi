@@ -8503,11 +8503,51 @@ cells={} pitch={:.2} text={:?}",
                     }
             })
         };
+        // S1552 (2026-09-25, default ON, opt-out OXI_S1552_DISABLE): a wrapSquare
+        // text box that leaves no usable side lane (both lanes, net of the wrap
+        // distance, below the S1031 floor: 41.5pt Latin / 100pt CJK) behaves as
+        // a top-and-bottom band — the host paragraph moves to the next page when
+        // the band does not fit (S734/S1513) and the flow resumes below it.
+        // educational__0050e825: a 540pt-wide rubric box (positionV paragraph
+        // +15.5, 362.7 tall) on a 468pt column; Word puts the host at the next
+        // page's top (72.0), the box at 87.5..450.2 and the next paragraph at
+        // 451.5; Oxi kept the host on the previous page and drew the box off
+        // the bottom.
+        let s1552_lane_min = if std::env::var("OXI_S1031_DISABLE").is_err()
+            && !self.doc_body_has_real_cjk
+        {
+            41.5
+        } else {
+            100.0
+        };
+        let s1552_no_lane = |tb: &crate::ir::TextBox| -> bool {
+            std::env::var_os("OXI_S1552_DISABLE").is_none()
+                && tb.wrap_type == Some(crate::ir::WrapType::Square)
+                && tb.position.as_ref().map_or(false, |tp| {
+                    let col_l = page.margin.left;
+                    let col_r = page.size.width - page.margin.right;
+                    let (rl, rw) = match tp.h_relative.as_deref() {
+                        Some("page") => (0.0, page.size.width),
+                        _ => (col_l, col_r - col_l),
+                    };
+                    let x0 = match tp.h_align.as_deref() {
+                        Some("center") => rl + (rw - tb.width) * 0.5,
+                        Some("right") => rl + rw - tb.width,
+                        Some("left") => rl,
+                        _ => rl + tp.x,
+                    };
+                    let dl = tp.dist_l.unwrap_or(9.0);
+                    let dr = tp.dist_r.unwrap_or(9.0);
+                    let left_lane = x0 - dl - col_l;
+                    let right_lane = col_r - (x0 + tb.width + dr);
+                    left_lane.max(right_lane) < s1552_lane_min
+                })
+        };
         let s1497b_tb_overlaps = |block_idx: usize, byp: &[f32], bcx: &[f32], sx: f32, cw: f32| -> bool {
             if !s1497_on { return true; }
             page.text_boxes.iter().any(|tb| {
                 tb.anchor_block_index == block_idx
-                    && tb.wrap_type == Some(crate::ir::WrapType::TopAndBottom)
+                    && (tb.wrap_type == Some(crate::ir::WrapType::TopAndBottom) || s1552_no_lane(tb))
                     && tb.position.as_ref().map_or(false, |p| p.v_relative.as_deref() == Some("paragraph"))
                     && {
                         let (fx, _) = self.resolve_textbox_position(tb, page, byp, bcx);
@@ -8630,6 +8670,26 @@ cells={} pitch={:.2} text={:?}",
         // it was reserved (the anchor paragraph now sits BELOW it, so resolving
         // from the paragraph's y would double-shift) — the S734 contract.
         let mut s1089_flow_pos: std::collections::HashMap<usize, (usize, f32)> = Default::default();
+        // S1552: push-only band (anchor block -> off + height) for wrapSquare
+        // boxes without a usable lane. Only the host-push decision consults it;
+        // the flow between the host and the box top is untouched
+        // (policies__0beb595a: a 23pt box 84pt below its host, Word flows six
+        // lines above it) and it never records a flow position.
+        let s1552_bands: std::collections::HashMap<usize, f32> = {
+            let mut m: std::collections::HashMap<usize, f32> = Default::default();
+            for tb in &page.text_boxes {
+                if !s1552_no_lane(tb) {
+                    continue;
+                }
+                let off = match tb.position.as_ref() {
+                    Some(p) if p.v_relative.as_deref() == Some("paragraph") => p.y.max(0.0),
+                    _ => continue,
+                };
+                let e = m.entry(tb.anchor_block_index).or_insert(0.0_f32);
+                *e = e.max(off + tb.height);
+            }
+            m
+        };
         let mut shared_float_anchors: std::collections::HashMap<usize, (usize, f32)> = Default::default();
         // S758 (2026-07-06, default ON, opt-out OXI_S758_DISABLE): wrapSquare
         // floating-IMAGE side-wrap. Word narrows every LINE whose y-range
@@ -9166,6 +9226,47 @@ cells={} pitch={:.2} text={:?}",
                 } else {
                     cursor.advance(band_h);
                 }
+                }
+            }
+            // S1552: a wrapSquare box without a usable lane moves its host to
+            // the next page when the box would not fit below the host (same
+            // test as S1089/S1513: band > remaining, band <= content height);
+            // nothing else changes — the flow around the box is S758's.
+            if let Some(&band_h) = s1552_bands.get(&block_idx)
+                .filter(|_| !s1089_tb_bands.contains_key(&block_idx))
+                .filter(|_| s1497b_tb_overlaps(block_idx, &block_y_positions, &block_col_x, start_x, content_width))
+            {
+                let remaining = (start_y + content_height) - cursor.cursor_y;
+                if band_h > remaining && band_h <= content_height && !elements.is_empty()
+                    && !(crate::layout::s1467_float_column_flow() && current_column + 1 < num_columns)
+                {
+                    dbg_page_push(pages.len(), 0);
+                    pages.push(LayoutPage {
+                        width: page.size.width,
+                        height: page.size.height,
+                        elements: std::mem::take(&mut elements),
+                    });
+                    if let Some(g) = s755_geom.as_ref() {
+                        start_y = g.top(pages.len() + 1);
+                        content_height = g.ch(pages.len() + 1);
+                    }
+                    cursor.set(start_y);
+                    lm2_cells = 0;
+                    current_page_idx += 1;
+                    footnote_reserve_current = 0.0;
+                    footnote_ids_current_page.clear();
+                    s900_fold(
+                        &mut footnote_reserve_current,
+                        &mut footnote_ids_current_page,
+                        &mut s900_pending_deferred,
+                        current_page_idx,
+                    );
+                    if crate::layout::s1467_float_column_flow() {
+                        current_column = 0;
+                        start_x = col_x_positions[0];
+                        content_width = col_widths[0];
+                        col_band_top = start_y;
+                    }
                 }
             }
             // S842 (2026-07-14, opt-out OXI_S842_DISABLE): a PAGE-anchored

@@ -60,6 +60,8 @@ def census(path):
         # S1553: continuous sections that carry their own header/footer references
         "cont_sect_hf": sum(1 for sp in re.findall(r"<w:sectPr[ >].*?</w:sectPr>", d, re.S)
                             if 'w:type w:val="continuous"' in sp and ("headerReference" in sp or "footerReference" in sp)),
+        # S1554: block-level content controls (sdtContent wrapping a paragraph)
+        "blk_sdt": len(re.findall(r"<w:sdtContent><w:p[ >]", d)),
         # S1551: table styles that carry HTML autospacing in their pPr
         "tblstyle_autospacing": len(re.findall(r'<w:style [^>]*w:type="table"[^>]*>(?:(?!</w:style>).)*Autospacing="1"', st, re.S)),
         # S1539: runs with a character scale (w:w) other than 100

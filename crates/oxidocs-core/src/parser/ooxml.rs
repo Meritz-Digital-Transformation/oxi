@@ -11985,6 +11985,16 @@ fn parse_table_cell(
                     "tcPr" if depth == 0 => {
                         cell_props = parse_cell_properties(reader)?;
                     }
+                    // S1554 (2026-09-25, default ON, opt-out OXI_S1554_DISABLE): a
+                    // block-level content control inside a cell (`<w:tc><w:sdt>
+                    // <w:sdtContent><w:p>…`) is a transparent wrapper, as at body
+                    // level. The default arm counted it as depth 1, so its
+                    // paragraphs never matched `"p" if depth == 0` and were
+                    // dropped. forms__005382158: every 'Click or tap to enter a
+                    // date.' cell (w:date controls) rendered empty, the rows sat
+                    // one line short and 17 paragraphs changed page.
+                    "sdt" | "sdtContent" if depth == 0
+                        && std::env::var_os("OXI_S1554_DISABLE").is_none() => {}
                     _ => {
                         depth += 1;
                     }
