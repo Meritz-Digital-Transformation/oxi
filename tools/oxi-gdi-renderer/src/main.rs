@@ -5,7 +5,51 @@
 
 use std::path::Path;
 
+/// 2026-09-25: hard commit-charge cap for this process (default 4 GiB;
+/// `OXI_MEM_CAP_MB` overrides, 0 disables). A layout loop that stops making
+/// progress otherwise grows until Windows' auto-managed pagefile is exhausted
+/// and the machine hard-resets (three unclean reboots 2026-09-24/25 from a
+/// renderer at 24-46 GB). Under the cap the allocation fails, Rust aborts with
+/// "memory allocation of N bytes failed", and the caller sees an error row.
+#[cfg(windows)]
+fn install_memory_cap() {
+    use windows::Win32::System::JobObjects::*;
+    use windows::Win32::System::Threading::GetCurrentProcess;
+    let cap_mb: u64 = std::env::var("OXI_MEM_CAP_MB")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(4096);
+    if cap_mb == 0 {
+        return;
+    }
+    unsafe {
+        let Ok(job) = CreateJobObjectW(None, windows::core::PCWSTR::null()) else {
+            return;
+        };
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_JOB_MEMORY;
+        let bytes = (cap_mb as usize).saturating_mul(1024 * 1024);
+        info.ProcessMemoryLimit = bytes;
+        info.JobMemoryLimit = bytes;
+        if SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const core::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        )
+        .is_err()
+        {
+            return;
+        }
+        let _ = AssignProcessToJobObject(job, GetCurrentProcess());
+    }
+}
+
+#[cfg(not(windows))]
+fn install_memory_cap() {}
+
 fn main() {
+    install_memory_cap();
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
         eprintln!("Usage: {} <input.docx> <output_prefix> [dpi] [--exclude=text,border,shading,box,image,clip] [--supersample=N]", args[0]);

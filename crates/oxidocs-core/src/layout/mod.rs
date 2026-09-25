@@ -14134,7 +14134,7 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                     // and returns per-page ids for the footnote-area renderer.
                     // 0 corpus docs carry footnote refs inside tables (scanned)
                     // → None everywhere → byte-identical by construction.
-                    let mut s740_row_fn: Vec<(Vec<u32>, f32)> = Vec::new();
+                    let mut s740_row_fn: Vec<(Vec<u32>, f32, Vec<f32>)> = Vec::new();
                     let mut s740_any = false;
                     if !page.footnotes.is_empty()
                         && std::env::var("OXI_S740_DISABLE").is_err()
@@ -14168,11 +14168,12 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                             for cell in &row.cells {
                                 cell_fn_ids(&cell.blocks, &mut ids);
                             }
-                            let h: f32 = ids.iter().map(|id| estimate_footnote_h(*id)).sum();
+                            let hs: Vec<f32> = ids.iter().map(|id| estimate_footnote_h(*id)).collect();
+                            let h: f32 = hs.iter().sum();
                             if !ids.is_empty() {
                                 s740_any = true;
                             }
-                            s740_row_fn.push((ids, h));
+                            s740_row_fn.push((ids, h, hs));
                         }
                     }
                     // S727-derived: in a TYPED docGrid the footnote separator
@@ -14186,7 +14187,7 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                     {
                         let first = s740_row_fn
                             .iter()
-                            .find_map(|(ids, _)| ids.first().copied())
+                            .find_map(|(ids, _, _)| ids.first().copied())
                             .unwrap_or(1);
                         footnote_sep_alloc(first)
                     } else {
@@ -14301,7 +14302,48 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                         // is what sits 1.5pt low, so adding here double-counts and cost
                         // 008a2f3e and 9e4d04b4 a PASS each.
                         let bw = if table.style.border {
-                            0.0
+                            // S1536 (2026-09-24, OPT-IN OXI_S1536=1 since 2026-09-25):
+                            // on a linesAndChars grid Bug A never shifts the table's start
+                            // (bug_a_enabled = grid_char_pitch.is_none()), so nothing
+                            // stands in for the bottom edge and the flow below the table
+                            // resumes a border width too high. Word PDF rules
+                            // (tools/metrics/_pb_tblgap_para_gen.py, 12 arms: grid
+                            // {linesAndChars 323, lines 300, none} x sz {4, 12} x
+                            // {empty, empty+text} between two table-bordered tables):
+                            // the table starts AT the cursor in every arm and the
+                            // block after it starts bottom-rule + width (lc sz4: empty
+                            // 16.70 = 16.15 + 0.55, text 32.90; sz12 17.78 / 33.86).
+                            // Oxi lc gave 15.8 / 32.3 / 16.3 / 32.3. policies__1d77cba8
+                            // p10-11: +0.4 / +0.7 / +0.7 at three such junctions
+                            // tipped 【表２の２】 row 1's first line into p11. lines/none
+                            // keep the Bug A start shift as their stand-in (their gaps
+                            // already match: 15.50 / 16.58 / 13.82 / 14.78).
+                            // Demoted to opt-in 2026-09-25: the s1537 785 gate lost
+                            // reference__0ea3ec86480140c2 (43 -> 45 pages: the +0.5
+                            // after a table on p3 tips a last line that Word keeps,
+                            // then an empty page) and technical__9e4d04b448f84674
+                            // (4 -> 6), while policies__1d77cba8 gained. The probe
+                            // measured the gap below a table; the page-bottom fit of
+                            // the line that follows is a second question the rule
+                            // does not answer yet. Re-derive with both before ON.
+                            if page.grid_char_pitch.is_some()
+                                && std::env::var_os("OXI_S1536").is_some()
+                            {
+                                table.style.bottom_border.as_ref().map_or(
+                                    table.style.border_width.unwrap_or(0.5),
+                                    |d| {
+                                        if d.style == "none" || d.style == "nil" {
+                                            0.0
+                                        } else if d.style == "double" {
+                                            d.width * 3.0
+                                        } else {
+                                            d.width
+                                        }
+                                    },
+                                )
+                            } else {
+                                0.0
+                            }
                         } else {
                             table.rows.last().map_or(0.0, |r| {
                                 r.cells
@@ -28120,9 +28162,11 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                 if !is_vert_frag {
                     el.baseline_offset = story_inline_baseline.or(body_baseline).or(header_baseline).map(|b| b + vert_offset);
                 }
+                // S1527: every text fragment keeps its source run (cell text
+                // included) so a footnote reference can be found on its line.
+                el.run_index = Some(frag.run_index);
                 if let Some(pi) = body_para_index {
                     el.paragraph_index = Some(pi);
-                    el.run_index = Some(frag.run_index);
                     el.char_offset = Some(frag.char_offset);
                     if frag.field_type.is_none() {
                         if let Some(Some(map)) = case_sources.get(frag.run_index) {
@@ -40680,7 +40724,7 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
         // S740 (2026-07-04): footnote refs INSIDE table cells. Per-row
         // (ids, reserve_height) precomputed by the body caller; None (all other
         // call sites / tables without cell footnotes) = byte-identical.
-        row_footnotes: Option<&[(Vec<u32>, f32)]>,
+        row_footnotes: Option<&[(Vec<u32>, f32, Vec<f32>)]>,
         // Per-page (offset from the table's entry page) footnote ids placed by
         // this table's rows — the caller merges into page_fn_refs so the
         // footnote-area renderer draws each note on the page of its row.
@@ -40716,7 +40760,7 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
         // S740 (2026-07-04): footnote refs INSIDE table cells. Per-row
         // (ids, reserve_height) precomputed by the body caller; None (all other
         // call sites / tables without cell footnotes) = byte-identical.
-        row_footnotes: Option<&[(Vec<u32>, f32)]>,
+        row_footnotes: Option<&[(Vec<u32>, f32, Vec<f32>)]>,
         // Per-page (offset from the table's entry page) footnote ids placed by
         // this table's rows — the caller merges into page_fn_refs so the
         // footnote-area renderer draws each note on the page of its row.
@@ -41132,10 +41176,10 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
             }
             if let Some(rf) = row_footnotes {
                 if let Some(prev) = s740_pending_commit.take() {
-                    let (ids_all, h_all) = &rf[prev];
+                    let (ids_all, _h_all, hs_all) = &rf[prev];
                     // S1527: leave out the ids the split already placed.
                     let ids: Vec<u32> = ids_all.iter().copied().filter(|id| !s1527_early.contains(id)).collect();
-                    let h = if ids_all.is_empty() { 0.0 } else { *h_all * ids.len() as f32 / ids_all.len() as f32 };
+                    let h: f32 = ids_all.iter().zip(hs_all.iter()).filter(|(id, _)| ids.contains(id)).map(|(_, h)| *h).sum();
                     if !ids.is_empty() {
                         if !s740_page_has_notes {
                             s740_reserve += fn_sep;
@@ -50562,9 +50606,9 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                 // paragraph's first line). Applied at the first split here and
                 // at every continuation page in the loop below.
                 let s1527_on = std::env::var_os("OXI_S1527_DISABLE").is_none();
-                let (s1527_refs, s1527_share): (Vec<(usize, usize, u32)>, f32) = match row_footnotes {
+                let (s1527_refs, s1527_heights): (Vec<(usize, usize, String, u32)>, Vec<(u32, f32)>) = match row_footnotes {
                     Some(rf) if s1527_on && !rf[row_idx].0.is_empty() => {
-                        let (ids_all, h_all) = &rf[row_idx];
+                        let (ids_all, _h_all, hs_all) = &rf[row_idx];
                         let mut refs = Vec::new();
                         for (ci, cell) in row.cells.iter().enumerate() {
                             let mut pi = 0usize;
@@ -50572,39 +50616,87 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                 if let Block::Paragraph(p) = b {
                                     for r in &p.runs {
                                         if let Some(id) = r.footnote_ref {
-                                            refs.push((ci, pi, id));
+                                            refs.push((ci, pi, r.text.trim().to_string(), id));
                                         }
                                     }
                                     pi += 1;
                                 }
                             }
                         }
-                        (refs, *h_all / ids_all.len() as f32)
+                        (refs, ids_all.iter().copied().zip(hs_all.iter().copied()).collect())
                     }
-                    _ => (Vec::new(), 0.0),
+                    _ => (Vec::new(), Vec::new()),
                 };
                 // (bottom, page_has_notes, elements, already placed) -> (new bottom, kept ids)
                 let s1527_reserve = |bottom: f32, has_notes: bool, els: &[LayoutElement], early: &[u32]| -> (f32, Vec<u32>) {
+                    // (line_top, line_bot, note height, id) per reference whose
+                    // line is among `els`; the marker element (rendered note
+                    // number in a superscript-sized font, same cell paragraph)
+                    // names the line, else the paragraph's first line stands in.
+                    let mut cands: Vec<(f32, f32, f32, u32)> = Vec::new();
+                    for (ci, pi, marker, id) in s1527_refs.iter() {
+                        let (ci, pi, id) = (*ci, *pi, *id);
+                        if early.contains(&id) || cands.iter().any(|c| c.3 == id) {
+                            continue;
+                        }
+                        let nh = s1527_heights.iter().find(|(i, _)| *i == id).map(|(_, h)| *h).unwrap_or(0.0);
+                        let para_els: Vec<&LayoutElement> = els
+                            .iter()
+                            .filter(|e| e.cell_col_index == Some(ci) && e.cell_paragraph_index == Some(pi)
+                                && e.cell_ancestor_path.is_empty()
+                                && matches!(e.content, LayoutContent::Text { .. }))
+                            .collect();
+                        if para_els.is_empty() {
+                            continue;
+                        }
+                        let para_fs = para_els
+                            .iter()
+                            .filter_map(|e| match &e.content { LayoutContent::Text { font_size, .. } => Some(*font_size), _ => None })
+                            .fold(0.0f32, f32::max);
+                        let marker_els: Vec<&&LayoutElement> = if marker.is_empty() {
+                            Vec::new()
+                        } else {
+                            para_els.iter().filter(|e| match &e.content {
+                                LayoutContent::Text { text, font_size, .. } =>
+                                    text.trim() == marker.as_str() && *font_size < para_fs * 0.85,
+                                _ => false,
+                            }).collect()
+                        };
+                        let (top, bot) = if !marker_els.is_empty() {
+                            marker_els.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(t, b), e| {
+                                (t.min(e.y - e.flow_line_offset), b.max(e.y + e.height))
+                            })
+                        } else {
+                            // first line of the paragraph
+                            let t = para_els.iter().map(|e| e.y - e.flow_line_offset).fold(f32::INFINITY, f32::min);
+                            let b = para_els.iter().filter(|e| (e.y - e.flow_line_offset - t).abs() < 0.5)
+                                .map(|e| e.y + e.height).fold(f32::NEG_INFINITY, f32::max);
+                            (t, b)
+                        };
+                        cands.push((top, bot, nh, id));
+                    }
+                    cands.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
                     let mut bottom = bottom;
                     let mut kept: Vec<u32> = Vec::new();
-                    for &(ci, pi, id) in &s1527_refs {
-                        if early.contains(&id) || kept.contains(&id) {
-                            continue;
-                        }
-                        let y = els
-                            .iter()
-                            .filter(|e| e.cell_col_index == Some(ci)
-                                && e.cell_paragraph_index == Some(pi)
-                                && matches!(e.content, LayoutContent::Text { .. }))
-                            .map(|e| e.y)
-                            .fold(f32::INFINITY, f32::min);
-                        if !y.is_finite() {
-                            continue;
+                    for (top, bot, nh, id) in cands {
+                        if top >= bottom {
+                            break;
                         }
                         let sep = if kept.is_empty() && !has_notes { fn_sep } else { 0.0 };
-                        if y + 0.5 < bottom - s1527_share - sep {
-                            bottom -= s1527_share + sep;
+                        let fits = bot <= bottom - nh - sep + 0.5;
+                        if std::env::var("OXI_DBG_SPLIT").is_ok() {
+                            eprintln!("[SPLIT-S1527-REF] id={} line {:.2}..{:.2} nh={:.2} sep={:.2} bottom={:.2} fits={}", id, top, bot, nh, sep, bottom, fits);
+                        }
+                        if fits {
+                            bottom -= nh + sep;
                             kept.push(id);
+                        } else {
+                            // the line moves to the next page with its note; so
+                            // does everything below it. The cut sits just under
+                            // the line's top so the line ABOVE (whose bottom
+                            // coincides with this top within rounding) stays.
+                            bottom = bottom.min(top + 0.4);
+                            break;
                         }
                     }
                     (bottom, kept)
@@ -51825,7 +51917,19 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                     row.cells.first().and_then(|c| c.margins.as_ref().and_then(|m| m.bottom))
                         .unwrap_or(default_pad_b)
                 } else { 0.0 };
+                // 2026-09-25: hard cap on continuation pages for ONE row. The
+                // loop's progress guarantee (overflow shifts up by a page each
+                // pass) can be broken by a re-anchor that shifts it back down
+                // (S1530 before S1530b); without a cap the renderer allocated
+                // pages until the machine's memory was gone. 4096 pages for a
+                // single row is far beyond any real document.
+                let mut split_loop_pages = 0usize;
                 loop {
+                    split_loop_pages += 1;
+                    if split_loop_pages > 4096 {
+                        eprintln!("[SPLIT-GUARD] row {} continuation split made no progress after {} pages; placing the rest on the current page", row_idx, split_loop_pages - 1);
+                        break;
+                    }
                     // Find the maximum Y in remaining elements.
                     // R7.77 (Session 62, 2026-05-16): exclude PresetShape elements
                     // from the max_y check. PresetShapes (e.g. 3a4f9f Shape A
@@ -52083,6 +52187,140 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                         }
                     }
 
+                    // S1530 (2026-09-24, opt-out OXI_S1530_DISABLE): widow/orphan
+                    // control for a cell paragraph cut by the continuation split.
+                    // Word never leaves a single line of a widowControl paragraph
+                    // on either side of the cut: one line staying -> the whole
+                    // paragraph moves; one line moving -> a second line goes with
+                    // it (and when that would leave one line, everything moves).
+                    // policies__0097185c p5: "e) Is living in housing" (4 lines)
+                    // had one line left above the footnote reserve; Word starts
+                    // it on p6 (PDF 93.1) while Oxi kept line 1 at 603.4. The
+                    // first-split path has its own widow handling; this loop
+                    // partitioned line by line with no look at the paragraph.
+                    if std::env::var_os("OXI_S1530_DISABLE").is_none() {
+                        let line_key = |e: &LayoutElement| ((e.y - e.flow_line_offset) * 10.0).round() as i64;
+                        let shift = next_split - page_top;
+                        let is_txt = |e: &LayoutElement| matches!(e.content, LayoutContent::Text { .. });
+                        // S1530b (2026-09-25): a paragraph is the host cell's OWN
+                        // paragraph only when its ancestor path is empty.
+                        // `cell_paragraph_index` restarts at 0 inside a nested
+                        // table, so keying on (col, para) alone merged a nested
+                        // table's lines with the host cell's paragraphs
+                        // (administrative__0001ce58b20a6729: the Zoom-invite
+                        // nested table and the "Agenda" paragraph both carried
+                        // (0, 1)). The phantom orphan sat at the page TOP, was
+                        // moved into the overflow, re-anchored to the same y, and
+                        // the loop never advanced — the renderer allocated pages
+                        // until the machine's memory was gone (three unclean
+                        // reboots 2026-09-24/25). Nested paragraphs are left to
+                        // the nested table's own layout.
+                        let direct = |e: &LayoutElement| e.cell_ancestor_path.is_empty() && e.cell_row_index == Some(row_idx);
+                        let mut moved_any = false;
+                        loop {
+                            let mut moved = false;
+                            let mut keys: Vec<(usize, usize)> = Vec::new();
+                            for e in overflow.iter() {
+                                if let (Some(ci), Some(pi)) = (e.cell_col_index, e.cell_paragraph_index) {
+                                    if is_txt(e) && direct(e) && !keys.contains(&(ci, pi)) {
+                                        keys.push((ci, pi));
+                                    }
+                                }
+                            }
+                            // The topmost text line of the page never moves: a
+                            // paragraph that starts at the page top has nowhere
+                            // higher to go, and emptying the page makes no
+                            // progress.
+                            let page_min_key = this_page.iter().filter(|e| is_txt(e)).map(|e| line_key(e)).min();
+                            for (ci, pi) in keys {
+                                let widow_on = row.cells.get(ci).map_or(true, |c| {
+                                    c.blocks
+                                        .iter()
+                                        .filter_map(|b| match b { Block::Paragraph(p) => Some(p), _ => None })
+                                        .nth(pi)
+                                        .map_or(true, |p| p.style.widow_control)
+                                });
+                                if !widow_on {
+                                    continue;
+                                }
+                                let mut stay: Vec<i64> = Vec::new();
+                                for e in this_page.iter() {
+                                    if e.cell_col_index == Some(ci) && e.cell_paragraph_index == Some(pi) && is_txt(e) && direct(e) {
+                                        let k = line_key(e);
+                                        if !stay.contains(&k) {
+                                            stay.push(k);
+                                        }
+                                    }
+                                }
+                                if stay.is_empty() {
+                                    continue;
+                                }
+                                let mut go: Vec<i64> = Vec::new();
+                                for e in overflow.iter() {
+                                    if e.cell_col_index == Some(ci) && e.cell_paragraph_index == Some(pi) && is_txt(e) && direct(e) {
+                                        let k = line_key(e);
+                                        if !go.contains(&k) {
+                                            go.push(k);
+                                        }
+                                    }
+                                }
+                                let move_all = stay.len() == 1 || (go.len() == 1 && stay.len() == 2);
+                                let move_last = !move_all && go.len() == 1 && stay.len() >= 3;
+                                if !move_all && !move_last {
+                                    continue;
+                                }
+                                if move_all && page_min_key == stay.iter().min().copied() {
+                                    if std::env::var("OXI_DBG_SPLIT").is_ok() {
+                                        eprintln!("[SPLIT-S1530] row={} cell={} para={} starts at the page top: kept", row_idx, ci, pi);
+                                    }
+                                    continue;
+                                }
+                                let last_key = *stay.iter().max().unwrap();
+                                let mut i = 0;
+                                while i < this_page.len() {
+                                    let e = &this_page[i];
+                                    let hit = e.cell_col_index == Some(ci)
+                                        && e.cell_paragraph_index == Some(pi)
+                                        && is_txt(e)
+                                        && direct(e)
+                                        && (move_all || line_key(e) == last_key);
+                                    if hit {
+                                        let mut e = this_page.remove(i);
+                                        e.y -= shift;
+                                        overflow.push(e);
+                                        moved = true;
+                                    } else {
+                                        i += 1;
+                                    }
+                                }
+                                if std::env::var("OXI_DBG_SPLIT").is_ok() {
+                                    eprintln!("[SPLIT-S1530] row={} cell={} para={} stay={} go={} move_all={} move_last={}", row_idx, ci, pi, stay.len(), go.len(), move_all, move_last);
+                                }
+                            }
+                            moved_any |= moved;
+                            if !moved {
+                                break;
+                            }
+                        }
+                        if moved_any {
+                            // The moved lines were re-based by the split shift and
+                            // now sit above the continuation top; slide every
+                            // overflow line down so the first one starts there.
+                            let min_ov_y = overflow.iter().filter(|e| is_txt(e)).map(|e| e.y).fold(f32::INFINITY, f32::min);
+                            let cont_top = page_top + s817_cont_pad;
+                            if min_ov_y.is_finite() && min_ov_y < cont_top - 0.1 {
+                                let adjust = cont_top - min_ov_y;
+                                for e in overflow.iter_mut() {
+                                    if is_txt(e) {
+                                        e.y += adjust;
+                                    }
+                                }
+                                if std::env::var("OXI_DBG_SPLIT").is_ok() {
+                                    eprintln!("[SPLIT-S1530] re-anchored overflow text +{:.2}", adjust);
+                                }
+                            }
+                        }
+                    }
                     // S719b (2026-07-02, default ON, opt-out OXI_S719_DISABLE): the
                     // overflow loop lacked Step-1's re-anchor — a text line STRADDLING
                     // the split boundary (top < next_split, bottom > next_split) gets
@@ -52940,10 +53178,10 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                 s740_page_has_notes = false;
             }
             if let Some(prev) = s740_pending_commit.take() {
-                let (ids_all, h_all) = &rf[prev];
+                let (ids_all, _h_all, hs_all) = &rf[prev];
                 // S1527: leave out the ids the split already placed.
                 let ids: Vec<u32> = ids_all.iter().copied().filter(|id| !s1527_early.contains(id)).collect();
-                let h = if ids_all.is_empty() { 0.0 } else { *h_all * ids.len() as f32 / ids_all.len() as f32 };
+                let h: f32 = ids_all.iter().zip(hs_all.iter()).filter(|(id, _)| ids.contains(id)).map(|(_, h)| *h).sum();
                 if !ids.is_empty() {
                     if !s740_page_has_notes {
                         s740_reserve += fn_sep;
