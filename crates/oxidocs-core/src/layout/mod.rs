@@ -33153,7 +33153,16 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                             let expected_w = if char_space_pt >= 0.0 && !s1210 {
                                 font_size * pitch / default_fs
                             } else if std::env::var_os("OXI_S1510_DISABLE").is_none()
-                                && char_width < 0.98 * font_size
+                                // S1539 (2026-09-25): judge "proportional" on the UNSCALED
+                                // width. A w:w-scaled full-width glyph (66%: 7.26 of 11)
+                                // passed this test, took the half-charSpace expected width
+                                // (7.63) and then S1347's cell scaling on top of it ->
+                                // 4.46 per glyph, where Word draws 7.91/8.03 (probe
+                                // `_pb_wscale_gen.py`, g_kana_lc_w66 / g_mixed_lc_w66:
+                                // Word PDF glyph origins on a linePitch 411 / charSpace
+                                // 3042 grid). Unscaled, the glyph is full-width, the
+                                // expected width is the pitch and S1347 gives 7.87.
+                                && char_width / s1347_scale < 0.98 * font_size
                             {
                                 // S1510 (2026-09-20, default ON, opt-out OXI_S1510_DISABLE):
                                 // the additive pitch is per GLYPH -- a proportional

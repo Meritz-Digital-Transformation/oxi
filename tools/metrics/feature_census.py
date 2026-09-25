@@ -49,6 +49,8 @@ def census(path):
         "inline_pics": d.count("<wp:inline"),
         "docgrid_type": (re.search(r'<w:docGrid[^>]*w:type="(\w+)"', d) or [None, ""])[1],
         "char_space": (lambda m: int(m.group(1)) if m else 0)(re.search(r'<w:docGrid[^>]*w:charSpace="(-?\d+)"', d)),
+        # S1539: runs with a character scale (w:w) other than 100
+        "w_scale": sum(1 for v in re.findall(r'<w:w w:val="(\d+)"', d) if v != "100"),
         "line_pitch": (lambda m: int(m.group(1)) if m else 0)(re.search(r'<w:docGrid[^>]*w:linePitch="(\d+)"', d)),
         "compat": (lambda m: int(m.group(1)) if m else 0)(re.search(r'w:name="compatibilityMode"[^>]*w:val="(\d+)"', se)),
         "fe_layout": "<w:useFELayout" in se,
