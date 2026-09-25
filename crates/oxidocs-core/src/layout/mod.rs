@@ -15601,6 +15601,21 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                         cursor.advance_split(0.0, s1181_img_unsnap);
                     }
                     prev_para_style_id = None;
+                    // S1566 (2026-09-26, default ON, opt-out OXI_S1566_DISABLE): the
+                    // image paragraph's OWN contextualSpacing is what the next
+                    // paragraph's S874 collapse sees, not the one from the paragraph
+                    // before the image. administrative__00433283 p3: «1. Director of
+                    // Finance» (List Paragraph, contextualSpacing) / an inline EMF
+                    // paragraph (Normal) / «Mr. Wells made a motion» (Normal): the stale
+                    // prev_ctx=true took the (true,false) arm and dropped the 10pt
+                    // after (Word Info(6) 570.0, Oxi 560.17), so the page ran 10pt
+                    // high and a double-spaced bullet line Word pushes to p4 stayed.
+                    if std::env::var_os("OXI_S1566_DISABLE").is_none() {
+                        prev_contextual_spacing = img
+                            .host_paragraph
+                            .as_ref()
+                            .map_or(false, |h| h.style.contextual_spacing);
+                    }
                     prev_borders = None; // S658: an image breaks border-merge adjacency
                     prev_autospacing_numid = None; // S931: and list adjacency
                     prev_keep_next = false; // S739
