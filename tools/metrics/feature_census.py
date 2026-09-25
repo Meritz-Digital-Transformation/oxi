@@ -49,6 +49,10 @@ def census(path):
         "inline_pics": d.count("<wp:inline"),
         "docgrid_type": (re.search(r'<w:docGrid[^>]*w:type="(\w+)"', d) or [None, ""])[1],
         "char_space": (lambda m: int(m.group(1)) if m else 0)(re.search(r'<w:docGrid[^>]*w:charSpace="(-?\d+)"', d)),
+        # S1540: no w:pgSz in any sectPr (Word lays such a section out on Letter)
+        "pgsz_absent": int('<w:pgSz' not in d),
+        # S1541: formula fields (instrText starting with '=')
+        "formula_fields": len(re.findall(r'<w:instrText[^>]*>\s*=', d)),
         # S1539: runs with a character scale (w:w) other than 100
         "w_scale": sum(1 for v in re.findall(r'<w:w w:val="(\d+)"', d) if v != "100"),
         "line_pitch": (lambda m: int(m.group(1)) if m else 0)(re.search(r'<w:docGrid[^>]*w:linePitch="(\d+)"', d)),

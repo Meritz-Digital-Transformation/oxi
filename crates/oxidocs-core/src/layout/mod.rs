@@ -20219,12 +20219,46 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                     }
                 }
             }
+            // S1542 (2026-09-25, opt-out OXI_S1542_DISABLE): the body may run
+            // into the footer's line box by the footer font's win descent.
+            // Probe `footerpush2/3` (A4, lines 360, 44 body lines whose last box
+            // ends at 809.85 + before, footer 14pt one line at footer 284):
+            //   ＭＳ 明朝 (line 18.16, top 809.54): Word keeps line 44 up to
+            //   box bottom 811.2 and drops it at 811.56 -> limit 809.54 + 1.96
+            //   (= 0.14 em win descent)
+            //   Century (line 17.08, top 810.62): kept through 812.76 -> limit
+            //   >= 810.62 + 2.14, 0.24 em = 3.36 (capped by the margin 813.55)
+            // Oxi rejected from 810.25 on. forms__017117b3d0f9921d p3: Word keeps
+            // a second empty 18pt paragraph ending at 813.0 above a 14pt footer;
+            // Oxi pushed it to p4 and every later page started one line late.
+            // Scope (2026-09-25 gate): the probe sheets all had a CJK body; on
+            // the EN corpus the allowance costs legal__003b5088 / policies__0097185c /
+            // legal__003a2d04 / legal__003ac6a4 (blind-F) and dozens of 785 docs
+            // -- there S726's footer-tight rule (derived on EN) stands. CJK only.
+            let s1542_descent = if std::env::var_os("OXI_S1542_DISABLE").is_none() && footer_h > 0.0
+                && self.doc_body_has_real_cjk {
+                blocks.iter().find_map(|b| match b {
+                    Block::Paragraph(p) if p.style.frame_pr.is_none() => {
+                        let fs = p.style.ppr_rpr.as_ref().and_then(|r| r.font_size)
+                            .or_else(|| p.style.default_run_style.as_ref().and_then(|r| r.font_size))
+                            .or_else(|| p.runs.iter().find_map(|r| r.style.font_size))
+                            .unwrap_or(self.default_font_size);
+                        let rpr = p.runs.iter().find(|r| !r.text.trim().is_empty()).map(|r| r.style.clone())
+                            .or_else(|| p.style.ppr_rpr.as_ref().cloned()).unwrap_or_default();
+                        let m = self.metrics_for_para_mark_g(&rpr, &p.style, true);
+                        Some((m.win_descent * fs).max(0.0))
+                    }
+                    _ => None,
+                }).unwrap_or(0.0)
+            } else {
+                0.0
+            };
             if std::env::var("OXI_DBG_FTR").is_ok() {
-                eprintln!("[FTR] n_footer_blocks={} footer_dist={:.1} footer_h={:.1} s780_extra={:.2} reserved={:.1} bottom_margin={:.1}",
-                    blocks.len(), footer_dist, footer_h, s780_extra,
-                    (footer_dist + footer_h).max(page.margin.bottom) + s780_extra, page.margin.bottom);
+                eprintln!("[FTR] n_footer_blocks={} footer_dist={:.1} footer_h={:.1} s780_extra={:.2} s1542_descent={:.2} reserved={:.1} bottom_margin={:.1}",
+                    blocks.len(), footer_dist, footer_h, s780_extra, s1542_descent,
+                    (footer_dist + footer_h - s1542_descent).max(page.margin.bottom) + s780_extra, page.margin.bottom);
             }
-            (footer_dist + footer_h).max(page.margin.bottom) + s780_extra
+            (footer_dist + footer_h - s1542_descent).max(page.margin.bottom) + s780_extra
         } else {
             if std::env::var("OXI_DBG_FTR").is_ok() {
                 eprintln!(
@@ -53801,6 +53835,36 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
         }
 
         // 2. Use cell widths from first row
+        // S1543 (2026-09-25, opt-out OXI_S1543_DISABLE): a grid without widths
+        // (`<w:gridCol/>` x2, tblW 5000 pct, tblLayout fixed) whose FIRST row is a
+        // spanning heading (one cell, no tcW) and whose body rows give a width
+        // for the first cell only (tcW 1250 pct): reference__009644b180d1bc56
+        // (METEOR export) fell to the equal split and laid its 25%/75% table
+        // out as 100pt columns -- one word per line, Word 3 pages / Oxi 9-10.
+        // Take the row with the MOST cells; cells with a width keep it and the
+        // cells without one share what is left of the table width equally.
+        if std::env::var_os("OXI_S1543_DISABLE").is_none() {
+            let base = match table.style.width_type.as_deref() {
+                Some("dxa") => table.style.width.unwrap_or(content_width),
+                Some("pct") => content_width * table.style.width.unwrap_or(100.0) / 100.0,
+                _ => content_width,
+            };
+            let base = (base - table.style.indent.unwrap_or(0.0)).max(0.0);
+            let best = table.rows.iter().filter(|r| !r.cells.is_empty()).max_by_key(|r| r.cells.len());
+            if let (Some(row), Some(first)) = (best, table.rows.first()) {
+                if row.cells.len() > first.cells.len() {
+                    let known: Vec<Option<f32>> = row.cells.iter().map(|c| {
+                        c.width.or_else(|| c.width_pct.map(|p| base * p / 100.0))
+                    }).collect();
+                    let n_unknown = known.iter().filter(|w| w.is_none()).count();
+                    let sum_known: f32 = known.iter().flatten().sum();
+                    if n_unknown < known.len() && (n_unknown == 0 || base > sum_known + 1.0) {
+                        let share = if n_unknown > 0 { (base - sum_known) / n_unknown as f32 } else { 0.0 };
+                        return known.iter().map(|w| w.unwrap_or(share)).collect();
+                    }
+                }
+            }
+        }
         if let Some(first_row) = table.rows.first() {
             let cell_widths: Vec<f32> = first_row.cells.iter().filter_map(|c| c.width).collect();
             if cell_widths.len() == first_row.cells.len() && !cell_widths.is_empty() {

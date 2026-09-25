@@ -6458,6 +6458,14 @@ fn parse_run(
             // Add-in instructions are opaque metadata. Their cached result is
             // the display text; keywords inside arguments are not field types.
             field_type = Some(FieldType::Cached);
+        } else if field.starts_with('=') && std::env::var_os("OXI_S1541_DISABLE").is_none() {
+            // S1541 (2026-09-25): a FORMULA field (`= b2-b3 \# "#,##0円"`,
+            // `= SUM(ABOVE)`) shows its cached result. Unclassified, its
+            // result runs were cleared by parse_paragraph's field-result
+            // suppression: administrative__108cf89559d5b3ef lost 138,931円 /
+            // 184,582円 / 45,651円 (the 差引 row) and administrative__0ed7739ee7
+            // one 6,390 -- both in Word's truth; tests/fixtures/fieldcell.
+            field_type = Some(FieldType::Cached);
         } else if field.contains("PAGE") && !field.contains("NUMPAGES") && !field.contains("PAGEREF") {
             text = "#".to_string();
             field_type = Some(FieldType::Page);
@@ -12390,6 +12398,11 @@ struct SectionProperties {
 /// Parse w:sectPr (section properties - page size, margins, document grid)
 fn parse_section_properties(reader: &mut Reader<&[u8]>) -> Result<SectionProperties, ParseError> {
     let mut page_size = PageSize::default();
+    // S1540 (2026-09-25): a sectPr WITHOUT w:pgSz is laid out by Word on US
+    // Letter (612 x 792), not A4 -- reference__009644b180d1bc56 (METEOR export,
+    // pgMar only) renders 3 Letter pages in Word's PDF (612.0 x 792.0) and 9
+    // A4 pages here. PageSize::default() stays A4 for new documents.
+    let mut saw_pg_sz = false;
     let mut margin = Margin::default();
     let mut margin_top_negative = false;
     let mut grid_line_pitch: Option<f32> = None;
@@ -12578,6 +12591,7 @@ fn parse_section_properties(reader: &mut Reader<&[u8]>) -> Result<SectionPropert
                 let local = local_name(e.name().as_ref());
                 match local.as_str() {
                     "pgSz" => {
+                        saw_pg_sz = true;
                         let mut orient = None;
                         for attr in e.attributes().flatten() {
                             let key = local_name(attr.key.as_ref());
@@ -12967,6 +12981,9 @@ fn parse_section_properties(reader: &mut Reader<&[u8]>) -> Result<SectionPropert
         }
     }
 
+    if !saw_pg_sz && std::env::var_os("OXI_S1540_DISABLE").is_none() {
+        page_size = PageSize { width: 612.0, height: 792.0 };
+    }
     Ok(SectionProperties {
         page_size,
         margin,
