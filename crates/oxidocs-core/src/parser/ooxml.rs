@@ -5194,12 +5194,14 @@ fn parse_paragraph_properties(
                                     // CT_OnOff attr: "1"/"true"/"on" => true (S675)
                                     let v = val.as_ref();
                                     style.before_autospacing = v == "1" || v == "true" || v == "on";
+                                    style.before_autospacing_off = !style.before_autospacing; // S1551
                                     style.has_direct_before_after = true;
                                     style.has_direct_before = true;
                                 }
                                 "afterAutospacing" => {
                                     let v = val.as_ref();
                                     style.after_autospacing = v == "1" || v == "true" || v == "on";
+                                    style.after_autospacing_off = !style.after_autospacing; // S1551
                                     style.has_direct_before_after = true;
                                     style.has_direct_after = true;
                                 }
@@ -5418,12 +5420,14 @@ fn parse_paragraph_properties(
                                     // CT_OnOff attr: "1"/"true"/"on" => true (S675)
                                     let v = val.as_ref();
                                     style.before_autospacing = v == "1" || v == "true" || v == "on";
+                                    style.before_autospacing_off = !style.before_autospacing; // S1551
                                     style.has_direct_before_after = true;
                                     style.has_direct_before = true;
                                 }
                                 "afterAutospacing" => {
                                     let v = val.as_ref();
                                     style.after_autospacing = v == "1" || v == "true" || v == "on";
+                                    style.after_autospacing_off = !style.after_autospacing; // S1551
                                     style.has_direct_before_after = true;
                                     style.has_direct_after = true;
                                 }

@@ -57,6 +57,8 @@ def census(path):
         "keeplines_off": len(re.findall(r'<w:keepLines w:val="(?:0|false|off)"', d)),
         # S1546: floating tables anchored to the page vertically (tblpPr vertAnchor="page")
         "tblp_page": len(re.findall(r'<w:tblpPr[^>]*w:vertAnchor="page"', d)),
+        # S1551: table styles that carry HTML autospacing in their pPr
+        "tblstyle_autospacing": len(re.findall(r'<w:style [^>]*w:type="table"[^>]*>(?:(?!</w:style>).)*Autospacing="1"', st, re.S)),
         # S1539: runs with a character scale (w:w) other than 100
         "w_scale": sum(1 for v in re.findall(r'<w:w w:val="(\d+)"', d) if v != "100"),
         "line_pitch": (lambda m: int(m.group(1)) if m else 0)(re.search(r'<w:docGrid[^>]*w:linePitch="(\d+)"', d)),

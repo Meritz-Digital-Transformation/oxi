@@ -1695,6 +1695,13 @@ pub struct ParagraphStyle {
     /// w:spacing@afterAutospacing — flat ~13.75pt auto after-space (see before_autospacing).
     #[serde(default)]
     pub after_autospacing: bool,
+    /// S1551: the direct pPr carried `beforeAutospacing="0"` (explicit OFF). A
+    /// table style's autospacing (S952) must not re-enable it — direct pPr wins.
+    #[serde(default)]
+    pub before_autospacing_off: bool,
+    /// S1551: explicit `afterAutospacing="0"` in the direct pPr.
+    #[serde(default)]
+    pub after_autospacing_off: bool,
     /// S895: the autospacing flags came from the paragraph STYLE (not direct
     /// pPr). Word applies STYLE-level HTML autospacing in Latin docs
     /// (legal__00081e80 Metadata style: measured ~13.95/gap) while the JP
@@ -1887,6 +1894,8 @@ impl Default for ParagraphStyle {
             has_explicit_snap_to_grid: false,
             contextual_spacing: false,
             before_autospacing: false,
+            before_autospacing_off: false,
+            after_autospacing_off: false,
             after_autospacing: false,
             autospacing_from_style: false,
             style_id: None,

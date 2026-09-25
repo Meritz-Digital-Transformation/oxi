@@ -13630,7 +13630,16 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                         cursor.set(start_y);
                         // The preceding paragraph's trailing gap belongs to the
                         // page it ended on, including when a table follows.
-                        if std::env::var("OXI_PAGE_BREAK_SPACING").is_ok() {
+                        // S1550 (2026-09-25, default ON, opt-out OXI_S1550_DISABLE; was
+                        // the sleeping opt-in OXI_PAGE_BREAK_SPACING). reports__0079718f
+                        // (compat 15): after every break-only paragraph (after 0 / 160 /
+                        // 200) the next block sits at the body top (133.2-134.6) in
+                        // Word's PDF whether it is a paragraph or a table; Oxi added
+                        // the 10pt (8pt for 160) before a TABLE only (143.6 / 141.6) —
+                        // the paragraph path already drops it at the page top.
+                        if std::env::var("OXI_PAGE_BREAK_SPACING").is_ok()
+                            || std::env::var("OXI_S1550_DISABLE").is_err()
+                        {
                             prev_space_after = 0.0;
                         }
                         current_column = 0;
@@ -14132,11 +14141,67 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                     }
                     // A splittable page-positioned float uses the remaining anchor-page
                     // capacity even when its visible origin is above the anchor.
+                    // S1547 (2026-09-25, default ON, opt-out OXI_S1547_DISABLE): only
+                    // when the float spans the flow column. A float that leaves a
+                    // side lane (>= 18.5pt net of the wrap distance, the S1195
+                    // floor) never competes with the flow for vertical space, so
+                    // its split budget is the page from its OWN top.
+                    // educational__1b2cea60: right-lane 評価規準 table (tblpX
+                    // 10491, 465pt wide beside a 430pt flow table) anchored at
+                    // 498.2 with tblpY 45.4 — Word draws all 307pt at 45.4..352.6
+                    // on the anchor page; the anchor-capacity budget split it at
+                    // 230.8 and pushed a page per lesson (+8).
                     if !self.keep_floating_tables_together
                         && committed_float_fit.is_none()
                         && table.style.position.as_ref().map_or(false, |p|
                             p.v_anchor.as_deref() == Some("page"))
-                        && candidate_y_top < saved_cursor_y {
+                        && candidate_y_top < saved_cursor_y
+                        && !(std::env::var("OXI_S1547_DISABLE").is_err() && {
+                            let tw: f32 = table.grid_columns.iter().sum();
+                            let tp = table.style.position.as_ref();
+                            let band_x0 = match tp {
+                                Some(tp) => match tp.h_align.as_deref() {
+                                    Some(ha) => {
+                                        let (rl, rw) = match tp.h_anchor.as_deref() {
+                                            Some("page") => (0.0, page.size.width),
+                                            _ => (start_x, content_width),
+                                        };
+                                        match ha {
+                                            "center" => rl + (rw - tw) * 0.5,
+                                            "right" => rl + rw - tw,
+                                            _ => rl,
+                                        }
+                                    }
+                                    None => match tp.h_anchor.as_deref() {
+                                        Some("page") => tp.x,
+                                        _ => start_x + tp.x,
+                                    },
+                                },
+                                None => start_x,
+                            };
+                            let (dl, dr) = tp.map_or((0.0, 0.0), |tp| (tp.left_from_text, tp.right_from_text));
+                            let left_lane = band_x0 - dl - start_x;
+                            let right_lane = start_x + content_width - (band_x0 + tw + dr);
+                            // The lane must carry REAL text, not just empties: the
+                            // S1031 usable-band floor (41.5pt Latin / 100pt CJK),
+                            // not the S1195 empty-paragraph floor (18.5). The
+                            // floating_table_keep fixture (flag0_page_lines6/12,
+                            // Word-measured) leaves a 32.9pt right lane and Word
+                            // still splits the float at the anchor page's capacity.
+                            let s1547_lane_min = if std::env::var("OXI_S1031_DISABLE").is_err()
+                                && !self.doc_body_has_real_cjk
+                            {
+                                41.5
+                            } else {
+                                100.0
+                            };
+                            let lane = left_lane.max(right_lane) >= s1547_lane_min;
+                            if std::env::var("OXI_DEBUG_FLOAT_FLOW").is_ok() {
+                                eprintln!("[FLOAT-S1547] block={} band_x0={:.2} tw={:.2} left_lane={:.2} right_lane={:.2} lane_min={:.1} lane={}",
+                                    block_idx, band_x0, tw, left_lane, right_lane, s1547_lane_min, lane);
+                            }
+                            lane
+                        }) {
                         committed_float_fit = Some(saved_cursor_y - candidate_y_top);
                     }
                     let pages_before = pages.len();
@@ -14577,6 +14642,49 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                             })
                             && float_text_bottom > saved_cursor_y + 0.1
                             && wide_table;
+                        // S1549 (2026-09-25, default ON, opt-out OXI_S1549_DISABLE):
+                        // in a multi-column section a page-anchored float pushes
+                        // only the flow of the COLUMNS it horizontally overlaps
+                        // (the S1497 rule for drawings, applied to floating
+                        // tables). educational__1b2cea60 p11 (cols=2): the 465pt
+                        // 評価規準 float sits over column 2 (x 524.55..989.5);
+                        // Word starts column 1's 430pt flow table at the page top
+                        // beside it (rules 45.4/62.4/70.9..), Oxi put it at 417.6
+                        // below the float and paid a page.
+                        let page_float_wide = page_float_wide
+                            && !(num_columns > 1
+                                && std::env::var("OXI_S1549_DISABLE").is_err()
+                                && {
+                                    let tp = table.style.position.as_ref();
+                                    let fx0 = match tp {
+                                        Some(tp) => match tp.h_align.as_deref() {
+                                            Some(ha) => {
+                                                let (rl, rw) = match tp.h_anchor.as_deref() {
+                                                    Some("page") => (0.0, page.size.width),
+                                                    _ => (start_x, content_width),
+                                                };
+                                                match ha {
+                                                    "center" => rl + (rw - table_w_pt) * 0.5,
+                                                    "right" => rl + rw - table_w_pt,
+                                                    _ => rl,
+                                                }
+                                            }
+                                            None => match tp.h_anchor.as_deref() {
+                                                Some("page") => tp.x,
+                                                _ => start_x + tp.x,
+                                            },
+                                        },
+                                        None => start_x,
+                                    };
+                                    let (dl, dr) = tp.map_or((0.0, 0.0), |tp| (tp.left_from_text, tp.right_from_text));
+                                    let (fl, fr) = (fx0 - dl, fx0 + table_w_pt + dr);
+                                    let no_overlap = fr <= start_x + 0.5 || fl >= start_x + content_width - 0.5;
+                                    if std::env::var("OXI_DBG_FLOAT").is_ok() {
+                                        eprintln!("[FLOAT-S1549] blk={} col=[{:.2}..{:.2}] float=[{:.2}..{:.2}] no_overlap={}",
+                                            block_idx, start_x, start_x + content_width, fl, fr, no_overlap);
+                                    }
+                                    no_overlap
+                                });
                         // S864: an edge-aligned float leaving <100pt beside it has
                         // no usable text band; Word flows following body below it.
                         // S1031 (2026-07-29, default ON, opt-out OXI_S1031_DISABLE):
@@ -57449,8 +57557,18 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
         let s952_b;
         let s952_a;
         if std::env::var("OXI_S952_DISABLE").is_err() {
-            s952_b = tbl_ps.map_or(false, |ts| ts.before_autospacing);
-            s952_a = tbl_ps.map_or(false, |ts| ts.after_autospacing);
+            // S1551 (2026-09-25, default ON, opt-out OXI_S1551_DISABLE): a direct
+            // `beforeAutospacing="0"` / `afterAutospacing="0"` on the cell paragraph
+            // switches the table style's autospacing OFF — direct pPr outranks the
+            // table style. reports__0079718f p44 (EDU-Basic3: before/afterAutospacing
+            // 1): the empty 10pt paragraph between 'Target: …' and 'Achieved …' has
+            // before/after 48 + Autospacing 0; Word's PDF gaps are 2.0 / 2.2pt, Oxi
+            // put 11.6 on each side, two such rows per page = the 34pt row drift.
+            let s1551 = std::env::var("OXI_S1551_DISABLE").is_err();
+            s952_b = tbl_ps.map_or(false, |ts| ts.before_autospacing)
+                && !(s1551 && para.style.before_autospacing_off);
+            s952_a = tbl_ps.map_or(false, |ts| ts.after_autospacing)
+                && !(s1551 && para.style.after_autospacing_off);
         } else {
             s952_b = false;
             s952_a = false;
