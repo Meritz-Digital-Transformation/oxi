@@ -57,6 +57,17 @@ def census(path):
         "keeplines_off": len(re.findall(r'<w:keepLines w:val="(?:0|false|off)"', d)),
         # S1546: floating tables anchored to the page vertically (tblpPr vertAnchor="page")
         "tblp_page": len(re.findall(r'<w:tblpPr[^>]*w:vertAnchor="page"', d)),
+        # 2026-09-26 (subset-gate fields for the S1558-S1566 classes):
+        # paragraphs that switch widowControl ON directly (S1558: 2-line orphan look-ahead)
+        "widow_on": len(re.findall(r'<w:widowControl(?:\s*/>|\s+w:val="(?:1|true|on)")', d)),
+        # paragraphs with a line multiple other than single (S1559: empty cell paragraph x factor)
+        "mult_line": len(re.findall(r'<w:spacing[^>]*w:line="(?!240")\d+"[^>]*w:lineRule="auto"', d)),
+        # contextualSpacing paragraphs (S1566: carry across an image paragraph)
+        "ctx_spacing": d.count("<w:contextualSpacing"),
+        # right-aligned tab stops (S1563 class: TOC page numbers at a stop near the boundary)
+        "right_tab": len(re.findall(r'<w:tab w:val="right"', d)),
+        # runs that name Arial Unicode MS (S1036/S1564)
+        "aum": d.count("Arial Unicode MS"),
         # S1553: continuous sections that carry their own header/footer references
         "cont_sect_hf": sum(1 for sp in re.findall(r"<w:sectPr[ >].*?</w:sectPr>", d, re.S)
                             if 'w:type w:val="continuous"' in sp and ("headerReference" in sp or "footerReference" in sp)),
