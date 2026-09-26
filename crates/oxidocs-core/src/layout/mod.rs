@@ -38716,8 +38716,11 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
         // paragraph a page late. (S1305's snap-off ASCII preference then
         // applies; a snapped line keeps the S583 grid calibration.)
         let s1394 = std::env::var("OXI_S1394_DISABLE").is_err();
+        // S1574: a CJK document's cell line of only whitespace is an empty line
+        // too (probe cell_blank_face: ASCII space / U+3000 arms = the empty arm).
         let s902_all_ws = !line.fragments.is_empty()
-            && !in_table_cell
+            && (!in_table_cell
+                || (self.doc_body_has_real_cjk && (std::env::var_os("OXI_S1574_DISABLE").is_none() && (!self.adjust_line_height_in_table || !para_style.snap_to_grid))))
             && (s1394 || !self.doc_body_has_real_cjk
                 || (line.whitespace_paragraph
                     && std::env::var("OXI_CJK_WHITESPACE_MARK").is_ok()))
@@ -48258,7 +48261,8 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                                 && effective_line_spacing.map_or(false, |f| f > 0.0);
                                             let s989_ascii = std::env::var("OXI_S989_DISABLE")
                                                 .is_err()
-                                                && (!self.doc_body_has_real_cjk || s1376_mark)
+                                                && (!self.doc_body_has_real_cjk || s1376_mark
+                                                    || (std::env::var_os("OXI_S1574_DISABLE").is_none() && (!self.adjust_line_height_in_table || !para.style.snap_to_grid)))
                                                 && matches!(
                                                     effective_line_rule,
                                                     None | Some("auto")
@@ -48276,7 +48280,8 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                                 // p2 grew ~1.5pt each and a three-line paragraph
                                                 // fell to p3 (+1 page).
                                                 && (rpr_ref.font_family.is_some()
-                                                    || (!self.doc_body_has_real_cjk
+                                                    || ((!self.doc_body_has_real_cjk
+                                                        || (std::env::var_os("OXI_S1574_DISABLE").is_none() && (!self.adjust_line_height_in_table || !para.style.snap_to_grid)))
                                                         && std::env::var_os("OXI_S1512_DISABLE").is_none()))
                                                 && (rpr_ref.font_family_east_asia.is_none() || s1376_mark || s1382
                                                     || (!self.doc_body_has_real_cjk
@@ -48286,6 +48291,18 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                                 &para.style,
                                                 s989_ascii,
                                             );
+                                            // S1574: in a CJK document the ascii-face empty line
+                                            // is its hhea natural (Century 8pt 9.617, Word PDF
+                                            // probe cell_blank_face); line_height_inner's CJK
+                                            // branch returned 11.25 for the same face.
+                                            if s989_ascii
+                                                && self.doc_body_has_real_cjk
+                                                && !empty_metrics.is_cjk_83_64_font()
+                                                && (std::env::var_os("OXI_S1574_DISABLE").is_none() && (!self.adjust_line_height_in_table || !para.style.snap_to_grid))
+                                            {
+                                                empty_metrics.natural_line_height_hhea(empty_fs)
+                                                    * effective_line_spacing.unwrap_or(1.0)
+                                            } else {
                                             self.line_height_inner(
                                                 empty_fs,
                                                 effective_line_spacing,
@@ -48295,6 +48312,7 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                                 row_line_pitch,
                                                 true,
                                             )
+                                            }
                                         } else {
                                             let metrics = self.doc_default_metrics();
                                             // S1231 (2026-08-26, opt-out OXI_S1231_DISABLE): a
@@ -56693,7 +56711,21 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
             && !in_cell
             && !para.runs.is_empty()
             && para.runs.iter().all(|r| r.text.trim().is_empty());
-        if para.runs.is_empty() || s1394_ws {
+        // S1574: a CJK cell paragraph whose runs carry no glyph and no inline
+        // object (only an anchored drawing's run, as in legal__0adfa250's
+        // 「大正・昭和」 text-box cell) is priced as an empty paragraph, the way
+        // the render side already lays it out (13.5 estimated vs 9.617 laid).
+        let s1574_glyphless = in_cell
+            && self.doc_body_has_real_cjk
+            && (!self.adjust_line_height_in_table || !para.style.snap_to_grid)
+            && std::env::var_os("OXI_S1574_DISABLE").is_none()
+            && !para.runs.is_empty()
+            && para.runs.iter().all(|r| r.text.is_empty()
+                && r.style.inline_object_extent.is_none()
+                && r.style.inline_object_image.is_none()
+                && r.footnote_ref.is_none() && r.endnote_ref.is_none()
+                && r.field_type.is_none() && r.ruby.is_none() && !r.is_math);
+        if para.runs.is_empty() || s1394_ws || s1574_glyphless {
             // Use pPr/rPr font for empty paragraph height
             let empty_fs = para
                 .style
@@ -56706,8 +56738,15 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
             // font (the S583/S707 rule) — the eastAsia-preferring resolution
             // returned a CJK 83/64 family (15.56 = 12 × 83/64) for Calibri
             // theme marks, bypassing the Latin hhea arm below.
+            // S1574 (2026-09-26, default ON, opt-out OXI_S1574_DISABLE): in a CJK
+            // document a textless CELL paragraph is priced in its ascii face too.
+            // Probe cell_blank_face (Century/MS Mincho docDefaults, 8pt, Word PDF
+            // rules): three text paragraphs 31.56, empty/space first+last 30.12
+            // = 2 x (10.375 - 9.62), Century's hhea line 2462/2048 x 8.
+            let s1574_cell = in_cell && self.doc_body_has_real_cjk
+                && (std::env::var_os("OXI_S1574_DISABLE").is_none() && (!self.adjust_line_height_in_table || !para.style.snap_to_grid));
             let s940_mark_ascii =
-                !self.doc_body_has_real_cjk && std::env::var("OXI_S940_DISABLE").is_err();
+                (!self.doc_body_has_real_cjk || s1574_cell) && std::env::var("OXI_S940_DISABLE").is_err();
             let s1394_ascii = s1394_ws && !(para.style.snap_to_grid && grid_pitch.is_some());
             let metrics = self.metrics_for_para_mark_g(&rpr_ref, &para.style, s940_mark_ascii || s1394_ascii);
             let is_single_empty = eff_lr.is_none() || eff_lr == Some("auto");
@@ -56747,7 +56786,7 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                         grid_pitch,
                         true,
                     )
-                } else if !self.doc_body_has_real_cjk
+                } else if (!self.doc_body_has_real_cjk || s1574_cell)
                     && !metrics.is_cjk_83_64_font()
                     && std::env::var("OXI_S940_DISABLE").is_err()
                 {
@@ -56777,6 +56816,15 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                 }
             } else {
                 self.line_height_inner(empty_fs, eff_ls, eff_lr, metrics, false, None, true)
+            };
+            // S1574: whichever estimate branch ran, a CJK document's ascii-face
+            // empty cell line is its hhea natural (the render side's value).
+            let h_added = if s1574_cell && s940_mark_ascii && is_single_empty
+                && !snap_in_cell && !metrics.is_cjk_83_64_font()
+            {
+                metrics.natural_line_height_hhea(empty_fs) * eff_ls.unwrap_or(1.0)
+            } else {
+                h_added
             };
             if std::env::var("OXI_DBG_CELLEMPTY").is_ok() {
                 eprintln!("[CELLEMPTY] fam={} fs={:.2} cjk={} snap_in_cell={} use_render_lh={} grid={:?} ls={:?} lr={:?} h_added={:.3}",
