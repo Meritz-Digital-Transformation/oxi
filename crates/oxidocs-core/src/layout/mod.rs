@@ -10274,9 +10274,19 @@ cells={} pitch={:.2} text={:?}",
                     if std::env::var_os("OXI_DBG1501").is_some() && para.style.page_section_break {
                         eprintln!("[S1501] block={} keep={} cursor={:.2} start_y={:.2} cont={} empty={}", block_idx, s1501_keep, cursor.cursor_y, start_y, para.style.continuous_section_break, para.runs.iter().all(|r| r.text.is_empty()));
                     }
-                    S1501_KEEP.with(|c| c.set(s1501_keep));
+                    // S1576 (2026-09-26, default ON, opt-out OXI_S1576_DISABLE): the
+                    // carrier of a CONTINUOUS section break keeps its mark line when a
+                    // TABLE follows (policies__0084b6ad p5/6: an empty TNR-12 carrier
+                    // between two tables; Word truth puts it at 242.2 and the next table
+                    // at 256.5, Oxi dropped it and the page ran 16pt short). S945 was
+                    // derived on a nextPage carrier.
+                    let s1576_keep = std::env::var_os("OXI_S1576_DISABLE").is_none()
+                        && para.style.continuous_section_break
+                        && matches!(page.blocks.get(block_idx + 1), Some(Block::Table(_)));
+                    S1501_KEEP.with(|c| c.set(s1501_keep || s1576_keep));
                     if std::env::var("OXI_S945_DISABLE").is_err()
                         && !s1501_keep
+                        && !s1576_keep
                         && !(para.style.page_break_after
                             && (std::env::var("OXI_SECTION_EXPLICIT_BREAKS").is_ok()
                                 || (para.style.continuous_section_break
