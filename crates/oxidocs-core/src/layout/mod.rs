@@ -12719,20 +12719,61 @@ cells={} pitch={:.2} text={:?}",
                                     && s1038_need_h > 0.0
                                     && this_h + s1038_need_h > remaining + 0.5
                                     && this_h + s1038_need_h <= content_height + 0.5;
-                                let table_follower_moves = if std::env::var_os("OXI_CJK_TABLE_FOLLOWER_PLACEMENT").is_some()
-                                    && self.doc_body_has_real_cjk && current_splits
+                                // S1577 (2026-09-26, default ON for Latin documents, opt-out
+                                // OXI_S1577_DISABLE): the follower-placement probe (a table laid
+                                // after the heading whose first page carries no data row moves
+                                // wholly, so the keepNext heading must go with it) is not a
+                                // CJK-only rule. reports__0079718f p109/110: 「Table 3.4: Budgeted
+                                // departmental statement…」 (TableHeading keepNext) then a table
+                                // whose first row does not fit the 42pt left -- Word starts p110
+                                // with both; Oxi left the heading at the p109 bottom.
+                                let s1577 = !self.doc_body_has_real_cjk
+                                    && std::env::var_os("OXI_S1577_DISABLE").is_none();
+                                let table_follower_moves = if (s1577
+                                    || (std::env::var_os("OXI_CJK_TABLE_FOLLOWER_PLACEMENT").is_some()
+                                        && self.doc_body_has_real_cjk)) && current_splits
                                     && this_h <= remaining && remaining < content_height - 0.5
                                 {
                                     let mut pp = Vec::new();
-                                    let mut pe = Vec::new();
-                                    let mut pc = LayoutCursor::new(cursor.cursor_y + this_h);
+                                    // S1577c: the heading will be on this page, so the table
+                                    // does not start on an empty page. Without a seed element
+                                    // the row loop's `has_content` guard was false and row 0,
+                                    // which Word and the real layout push whole, was split.
+                                    let mut pe: Vec<LayoutElement> = if s1577 {
+                                        elements.last().cloned().into_iter().collect()
+                                    } else { Vec::new() };
+                                    // S1577b: start the probe where the table really starts -- the
+                                    // pending collapsed gap above the heading (the previous
+                                    // paragraph's space-after is applied only when the heading is
+                                    // laid out, so `cursor` still sits above it) and the heading's
+                                    // own space-after, which the table arm adds before the table.
+                                    // 0079718f p109: 20 empty paragraphs end with after=12; the
+                                    // heading (2 x 11.5, after 1) then starts at 665.3 (Word Info(6)
+                                    // 665.5), the table at 689.3 and its 37.35pt first row passes
+                                    // the 718.6 bottom. From the bare cursor (653.3) the probe put
+                                    // the row at 676.3 and saw it fit.
+                                    let s1577_lead = if s1577 {
+                                        let sb = para.style.space_before.unwrap_or(0.0);
+                                        (prev_space_after.max(sb) - s1127_sb).max(0.0)
+                                            + para.style.space_after.unwrap_or(0.0)
+                                    } else { 0.0 };
+                                    let mut pc = LayoutCursor::new(cursor.cursor_y + this_h + s1577_lead);
+                                    if std::env::var_os("OXI_DBG_KN635").is_some() {
+                                        eprintln!("[S1577] cy={:.2} this_h={:.2} lead={:.2} prev_sa={:.2} sb={:?} sa={:?}",
+                                            cursor.cursor_y, this_h, s1577_lead, prev_space_after, para.style.space_before, para.style.space_after);
+                                    }
                                     let _ = self.layout_table(next_table, start_x, &mut pc, content_width,
                                         grid_pitch, page.grid_char_pitch, page.grid_char_cw_ratio,
                                         start_y, content_height, page.size.width, page.size.height,
                                         &mut pp, &mut pe, Some(block_idx + 1), page,
                                         false, None, None, 0.0, 0.0, false, None);
                                     let header_rows = next_table.rows.iter().take_while(|row| row.header).count();
-                                    let first_data_row = if header_rows < next_table.rows.len() { header_rows } else { 0 };
+                                    // S1577d: for Latin documents a repeated header row left on the
+                                    // page keeps the heading too. technical__00549a8f p17: 「DMIS ID
+                                    // Name」 + tblHeader row 0 stay (Word COM page 17), row 1 goes
+                                    // to p18; counting only data rows sent the heading to p18.
+                                    let first_data_row = if s1577 { 0 }
+                                        else if header_rows < next_table.rows.len() { header_rows } else { 0 };
                                     pp.first().map_or(false, |first| {
                                         !first.elements.iter().any(|el| match &el.content {
                                             LayoutContent::Text { text, .. } => !text.trim().is_empty()
@@ -14432,9 +14473,16 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                     // → None everywhere → byte-identical by construction.
                     let mut s740_row_fn: Vec<(Vec<u32>, f32, Vec<f32>)> = Vec::new();
                     let mut s740_any = false;
+                    // S1578 (2026-09-26, default ON, opt-out OXI_S1578_DISABLE): a
+                    // FLOATING table's cell footnotes reserve the note area too.
+                    // reports__0079718f p150: ref 24 sits in a tblpPr table
+                    // («Investigations reported to the ARC»); Word draws note 24
+                    // at the p150 bottom (separator 689.5) and so moves the next
+                    // floating table («Year | Performance measures») to p151.
+                    // Oxi reserved nothing and started that table at 674.5.
                     if !page.footnotes.is_empty()
                         && std::env::var("OXI_S740_DISABLE").is_err()
-                        && !is_floating
+                        && (!is_floating || std::env::var_os("OXI_S1578_DISABLE").is_none())
                     {
                         fn cell_fn_ids(blocks: &[Block], out: &mut Vec<u32>) {
                             for b in blocks {
@@ -14588,7 +14636,18 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                     // (14.04 / 13.08 without the grid) = the paragraph's own height plus
                     // the border width. Two ADJACENT tables share one rule and get no
                     // addend. forms__008a2f3e's whole page-1 drift was this single 1.44pt.
+                    // S1580 (2026-09-27, default ON, opt-out OXI_S1580_DISABLE): a table
+                    // whose foot S1191 already advanced inside layout_table (no
+                    // tblBorders, no insideH) must not get the bottom rule a second
+                    // time here. reports__003862302b p2 table 1 (tcBorders only, last
+                    // row bottom sz12): Word's next block starts at the rule + 1.44
+                    // (PDF 383.21 -> 384.65 -> empty 11.51 -> 396.16), Oxi at the rule +
+                    // 3.0, and every later line on the page sat 1.45 low.
+                    let s1580_foot_done = std::env::var_os("OXI_S1580_DISABLE").is_none()
+                        && self.s1191_on()
+                        && self.s1191_table_needs_foot(table);
                     if !is_floating
+                        && !s1580_foot_done
                         && std::env::var_os("OXI_S1452_DISABLE").is_none()
                         && !matches!(page.blocks.get(block_idx + 1), Some(Block::Table(_)))
                     {
@@ -41613,6 +41672,22 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                 || std::env::var("OXI_CJK_HEADER_ROW_CHAIN").is_ok());
         let s1083_on = std::env::var("OXI_S1083_DISABLE").is_err()
             && (!self.doc_body_has_real_cjk || cjk_header_chain);
+        // S1579 (2026-09-26, default ON, opt-out OXI_S1579_DISABLE): the header
+        // chain is not a CJK rule. reports__0079718f p181: a tblHeader row
+        // («Year | Performance measures | Expected performance results») fits at
+        // the page bottom, its first data row does not; Word starts p182 with
+        // both, Oxi left the header row alone on p181.
+        // Compat-mode gated: `_pb_hdrchain_latin_gen.py` (Calibri 11, tblHeader row
+        // + 4-line data rows, N swept over the page bottom, Word COM) -- compat 15
+        // moves the header with a data row that goes whole (cantSplit, or not one
+        // line fits) in every variant (bordered / borderless / 3-cell /
+        // one spanning cell); compat 14 and 12 leave the header alone on the page
+        // and repeat it (row 1 at 87.0 = header 72.75 + 14.25). technical__00549a8f
+        // (compat 14) keeps 「Responsible TMA Organization」 on p17 exactly so.
+        let header_chain = cjk_header_chain
+            || (!self.doc_body_has_real_cjk
+                && self.compat_mode >= 15
+                && std::env::var_os("OXI_S1579_DISABLE").is_none());
         // A row "keeps with the next row" when its LEFTMOST cell's FIRST
         // paragraph declares keepNext (the S1024 row-chain predicate).
         let s1083_kn = |ri: usize| -> bool {
@@ -43499,7 +43574,7 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                         c -= 1;
                     }
                     // Repeating leading headers stay with the first data chain.
-                    if cjk_header_chain && c > 0
+                    if header_chain && c > 0
                         && table.rows[..c].iter().all(|r| r.header)
                         && s1083_row_start.iter().any(|(ri, _)| *ri == 0)
                     {
@@ -43508,7 +43583,7 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                     let first_on_page = s1083_row_start.first().map(|(ri, _)| *ri);
                     // never blank the page: something must remain above the chain
                     let keeps_content = Some(c) != first_on_page || !current_elements.is_empty()
-                        || (cjk_header_chain && s1083_row_start.iter()
+                        || (header_chain && s1083_row_start.iter()
                             .find(|(ri, _)| *ri == c)
                             .map_or(false, |(_, y)| *y > page_top + 0.5));
                     if c < row_idx && keeps_content {
@@ -43520,7 +43595,7 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                     .into_iter()
                                     .partition(|e: &LayoutElement| e.y < cy - 0.1);
                             elements = keep;
-                            s1083_moves_header = cjk_header_chain && c == 0
+                            s1083_moves_header = header_chain && c == 0
                                 && table.rows.first().map_or(false, |r| r.header);
                             s1083_moved = moved;
                             s1083_extent = (cursor.cursor_y - cy).max(0.0);
@@ -53779,6 +53854,9 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
         // Word starts the following block under it (see s1191_foot_bw).
         if (separate_outer_edges || (self.s1191_on() && self.s1191_table_needs_foot(table))) {
             let foot = self.s1191_foot_bw(table);
+            if std::env::var_os("OXI_DBG_TBLFOOT").is_some() {
+                eprintln!("[TBLFOOT] cy={:.2} vy={:.2} foot={:.2} sep_outer={}", cursor.cursor_y, cursor.visual_y, foot, separate_outer_edges);
+            }
             if foot > 0.0 {
                 cursor.advance(foot);
             }
