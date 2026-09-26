@@ -33869,6 +33869,21 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                     // (chars/line) reflects Word's grid-pitch advance. Default-OFF
                     // keeps the legacy separate-accumulator positioning behavior.
                     char_width += char_grid_extra;
+                    // S1584 (2026-09-27, default ON, opt-out OXI_S1584_DISABLE): the
+                    // S1492 fold for an EXPANDING grid too. The S475 capacity was
+                    // accumulated at the bare em (210 tw at 10.5pt) while the
+                    // character advances the 10.84pt cell (217 tw): `_pb_hang_bracket_gen.py`
+                    // (linesAndChars 350/1382, jc=left) -- Word holds 41 あ on the
+                    // 453.5pt line, Oxi 42.
+                    // Scoped to explicit compat 15 (the probe's mode): reference__13e1b7fc
+                    // (compat 14, charSpace 3194) packs its bracket-heavy lines at the bare
+                    // em in Word, and this fold broke them a character early.
+                    if std::env::var_os("OXI_S1584_DISABLE").is_none()
+                        && self.compat_mode >= 15
+                        && self.compat_mode_explicit
+                    {
+                        pre_yakumono_width += char_grid_extra;
+                    }
                 }
                 // S1317 (2026-09-05, default ON, opt-out OXI_S1317_DISABLE): a
                 // grid-pitched character advances the line by the TRUE pitch,
@@ -47765,6 +47780,13 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                                     // tokyoshugyo (注) L2: 。 overflows 9.45pt > the
                                                     // compression budget -> Word pulls す down (L3 =
                                                     // す。); the old force-fit kept 。 on L2.
+                                                    // CJK documents only (the probe's scope): reports__003862302b
+                                                    // (Latin, compat 15) lost its fit when this fired on its cells.
+                                                    let s1583_left = std::env::var_os("OXI_S1583_DISABLE").is_none()
+                                                        && self.doc_body_has_real_cjk
+                                                        && self.compat_mode >= 15
+                                                        && self.compat_mode_explicit
+                                                        && !matches!(para.alignment, Alignment::Justify | Alignment::Distribute);
                                                     if std::env::var("OXI_S421_DISABLE").is_err()
                                                         && (s412_cellmar_subtract
                                                             || (std::env::var("OXI_S443_DISABLE")
@@ -47775,7 +47797,18 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                                                 && propcell_over > propcell_bound)
                                                             || s720_just_prop
                                                             || s713_cellmar_render
-                                                            || cell_natural_line_end)
+                                                            || cell_natural_line_end
+                                                            // S1583 (2026-09-27, default ON, opt-out
+                                                            // OXI_S1583_DISABLE): a compat-15 NON-justified
+                                                            // cell paragraph pushes the character before a
+                                                            // line-start-prohibited mark down with it
+                                                            // (追い出し) instead of force-fitting the mark.
+                                                            // `_pb_hang_bracket_gen.py` cell arms (3686tw,
+                                                            // linesAndChars 350/1382, jc=left): 16 あ + 、/。
+                                                            // /）/」 = 2 lines in Word, like 17 あ; jc=both
+                                                            // keeps the mark. legal__0adfa250 p4
+                                                            // 「□内職　□その他（　　　　　　）」.
+                                                            || s1583_left)
                                                     {
                                                         let ch_ctx = crate::layout::jc_both_compress::CharContext { ch, natural_advance: cw, font_size };
                                                         let mut carry: Vec<crate::layout::jc_both_compress::CharContext> = vec![ch_ctx];
@@ -47788,7 +47821,11 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                                                 ) || tail.map_or(
                                                                     false,
                                                                     kinsoku::is_line_end_prohibited,
-                                                                );
+                                                                // S1583: an ideographic space is no break point
+                                                                // inside a bracket group -- Word moves the whole
+                                                                // 「（　　　）」 (0adfa250 p2 「自宅・その他」 /
+                                                                // 「（　　　）」).
+                                                                ) || (s1583_left && head == '\u{3000}');
                                                             let remaining_on_line = buf
                                                                 .chars()
                                                                 .count()
