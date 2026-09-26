@@ -68,6 +68,8 @@ def census(path):
         "right_tab": len(re.findall(r'<w:tab w:val="right"', d)),
         # runs that name Arial Unicode MS (S1036/S1564)
         "aum": d.count("Arial Unicode MS"),
+        # floating tables of any anchor (S1569: keepNext paragraph before a float)
+        "tblp": d.count("<w:tblpPr"),
         # S1553: continuous sections that carry their own header/footer references
         "cont_sect_hf": sum(1 for sp in re.findall(r"<w:sectPr[ >].*?</w:sectPr>", d, re.S)
                             if 'w:type w:val="continuous"' in sp and ("headerReference" in sp or "footerReference" in sp)),

@@ -12053,7 +12053,13 @@ cells={} pitch={:.2} text={:?}",
                                 // position-based (y >= the chain-start cursor), so a float
                                 // anchored earlier but rendered below the chain start would
                                 // be swept along — none in the EN corpus headings.
-                                let s802b = !self.doc_body_has_real_cjk
+                                // S1570 (2026-09-26, default ON, opt-out OXI_S1570_DISABLE):
+                                // the JP side too. policies__1a7a3fec p31/32: 「3.15.2 偶発的
+                                // 曝露…」 (heading, keepNext) then 「3.15.2.1 偶発的曝露」
+                                // (keepNext) then body -- Word starts p32 with both headings,
+                                // Oxi pushed only the second and stranded the first.
+                                let s802b = (!self.doc_body_has_real_cjk
+                                    || std::env::var_os("OXI_S1570_DISABLE").is_none())
                                     && std::env::var("OXI_S802B_DISABLE").is_err();
                                 let mut pull_from = block_idx;
                                 if s802b && !(num_columns > 1 && current_column + 1 < num_columns) {
@@ -14073,6 +14079,41 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                     }
 
                     if move_float_to_next_page {
+                        // S1569 (2026-09-26, default ON, opt-out OXI_S1569_DISABLE): the
+                        // keepNext paragraphs directly above a float that starts on the
+                        // next page go with it (the S802B chain back-pull, for the
+                        // S1478 whole-move). policies__1a7a3fec p27/28: 「例示」
+                        // (keepNext) then a text-anchored float whose header row does
+                        // not fit -- Word starts p28 with 「例示」 and the table; Oxi left
+                        // the heading alone at the p27 bottom.
+                        let mut pull_from = block_idx;
+                        if std::env::var_os("OXI_S1569_DISABLE").is_none() && num_columns == 1 {
+                            while pull_from > 0 {
+                                match page.blocks.get(pull_from - 1) {
+                                    Some(Block::Paragraph(pp))
+                                        if pp.style.keep_next
+                                            && block_page_indices.get(pull_from - 1)
+                                                == Some(&current_page_idx) =>
+                                    {
+                                        pull_from -= 1;
+                                    }
+                                    _ => break,
+                                }
+                            }
+                        }
+                        let pulled: Vec<LayoutElement> = if pull_from < block_idx {
+                            let y0 = block_y_positions[pull_from] - 0.1;
+                            let (keep, moved): (Vec<LayoutElement>, Vec<LayoutElement>) =
+                                elements.drain(..).partition(|e| match e.paragraph_index {
+                                    Some(index) => index < pull_from || index >= block_idx,
+                                    None => e.y < y0,
+                                });
+                            elements = keep;
+                            moved
+                        } else {
+                            Vec::new()
+                        };
+                        let chain_end_old = cursor.cursor_y;
                         pages.push(LayoutPage {
                             width: page.size.width, height: page.size.height,
                             elements: std::mem::take(&mut elements),
@@ -14084,6 +14125,28 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                         }
                         saved_cursor_y = start_y;
                         cursor.set(start_y);
+                        if !pulled.is_empty() {
+                            let y_first = block_y_positions[pull_from];
+                            let dy = start_y - y_first;
+                            for mut e in pulled {
+                                e.y += dy;
+                                if let LayoutContent::TableBorder { ref mut y1, ref mut y2, .. } = e.content {
+                                    *y1 += dy;
+                                    *y2 += dy;
+                                }
+                                elements.push(e);
+                            }
+                            for bi in pull_from..block_idx {
+                                if let Some(p) = block_page_indices.get_mut(bi) {
+                                    *p = current_page_idx;
+                                }
+                                if let Some(y) = block_y_positions.get_mut(bi) {
+                                    *y += dy;
+                                }
+                            }
+                            saved_cursor_y = chain_end_old + dy;
+                            cursor.set(saved_cursor_y);
+                        }
                     }
 
                     // Floating table (tblpPr): position relative to anchor
@@ -24745,9 +24808,23 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                     .map_or(false, |b| matches!(b, Block::Paragraph(n)
                         if n.style.page_section_break
                             && n.runs.iter().all(|r| r.text.is_empty())));
+            // S1572 (2026-09-26, default ON, opt-out OXI_S1572_DISABLE): an empty
+            // line whose snapped box spans two or more grid cells is judged like
+            // text by the centred box, not by the full box. Probe gridbottom_fit
+            // (28 arms, Meiryo on a lines grid, empty and text identical): a
+            // 2-row box may overhang the body bottom by 6.9 (kept) but not 9.3.
+            // administrative__108cf8: Word keeps an empty Meiryo line whose 31.6
+            // box ends 6.1 past the bottom; Oxi pushed it and cascaded p2/p3.
+            // Single-cell empties keep S562b (roudoujoken, and the four Latin
+            // documents that regressed when S562b was dropped wholesale, S1557).
+            let s1572_multicell = std::env::var_os("OXI_S1572_DISABLE").is_none()
+                && !page.doc_grid_no_type
+                && para.style.snap_to_grid
+                && grid_pitch.is_some_and(|p| p > 0.0 && effective_lh > p * 1.5);
             let s562b_empty_full = std::env::var("OXI_S562B_DISABLE").is_err()
                 && para.runs.iter().all(|r| r.text.is_empty())
-                && !s1375_before_section_end;
+                && !s1375_before_section_end
+                && !s1572_multicell;
             // S576 (2026-06-15, default ON, opt-out OXI_S576_DISABLE): the
             // page-bottom break-fit measures the GLYPH INK (≈ em), not the
             // line-SPACING box. natural_lh is win_sum*83/64 = 1.297*em for CJK
@@ -26368,8 +26445,15 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
             // would strand line 0 alone = an ORPHAN, and Word whole-pushes
             // instead (nyserda p2 bottom ⎯-item: 3 lines, 2 fit → Word moves
             // all 3; the first split cut 1/2 = catalog #4).
+            // S1571 (2026-09-26, default ON, opt-out OXI_S1571_DISABLE): the JP
+            // side splits too. reports__393aa91f p4/5 (linesAndChars 400, MS
+            // P明朝 10pt, widowControl from Normal): a 7-line paragraph with 6
+            // lines of room -- Word keeps 5 on p4 and moves 2 (PDF baselines
+            // 654.7..734.6 / 84.6, 104.4); Oxi's legacy whole-move sent all 7
+            // to p5 and the doc ran one paragraph late for five pages.
             let s790_widow_split = line_idx > 1
-                && !self.doc_body_has_real_cjk
+                && (!self.doc_body_has_real_cjk
+                    || std::env::var_os("OXI_S1571_DISABLE").is_none())
                 && std::env::var("OXI_S790_DISABLE").is_err();
             // S1323 (2026-09-05, default ON, opt-out OXI_S1323_DISABLE): a
             // widow/orphan break inside a multi-column section goes to the
@@ -34148,6 +34232,22 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                 } else {
                                     0
                                 };
+                            } else if tab_align == TabStopAlignment::Right
+                                && std::env::var_os("OXI_S1567_DISABLE").is_none()
+                                && std::env::var("OXI_S774_DISABLE").is_err()
+                            {
+                                // S1567 (2026-09-26, default ON, opt-out OXI_S1567_DISABLE):
+                                // the CJK side keeps TABTW's compensating pair (the tw
+                                // track does not re-anchor), so the tab jump rides in the
+                                // NEXT word's fit width -- and without S774's slack a
+                                // right-aligned page number after a stop just inside the
+                                // boundary wrapped. policies__1a7a3fec p3 (toc 1, right
+                                // dot stop 415.15 on a 415.65 line): every chapter entry's
+                                // '3' went to a second line (Word: one line per entry,
+                                // COM Info(6) 247.5 / 274.5 / 469.5). The slack is the
+                                // jump itself: the segment pulls left from the stop.
+                                right_tab_slack_tw = pt_to_tw(w);
+                                center_tab_stop_tw = None;
                             }
                         } else {
                             // Regular space
@@ -56991,6 +57091,29 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                             // actual text layout may require additional height.
                             render_lh.max(metrics.word_line_height_table_cell(font_size))
                         }
+                    } else if !in_cell
+                        && self.doc_body_has_real_cjk
+                        && std::env::var_os("OXI_S1568_DISABLE").is_none()
+                    {
+                        // S1568 (2026-09-26, default ON, opt-out OXI_S1568_DISABLE): a
+                        // BODY paragraph of a CJK document is estimated with the line
+                        // height it will actually render at. The table-cell value
+                        // below (S499's tombstone is about CELL rows) priced a 10.5pt
+                        // MS Mincho body line at 12.625 against the rendered 13.62, so
+                        // keepNext look-aheads under-counted a follower by ~1pt/line.
+                        // policies__1a7a3fec p17: heading 2 「3.5 組合せ用語」 (keepNext)
+                        // + a 3-line widowControl paragraph were estimated at 70.4 in
+                        // 71.9 left, laid out at 73.1; the paragraph moved whole to p18
+                        // and left the heading behind (Word moves both).
+                        self.line_height_inner(
+                            font_size,
+                            eff_ls,
+                            eff_lr,
+                            metrics,
+                            para.style.snap_to_grid,
+                            grid_pitch,
+                            true,
+                        )
                     } else if !self.doc_body_has_real_cjk
                         && !metrics.is_cjk_83_64_font()
                         && std::env::var("OXI_S940T_DISABLE").is_err()
