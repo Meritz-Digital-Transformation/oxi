@@ -42814,6 +42814,18 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                 } else if row_idx + 1 == table.rows.len()
                     && self.s1191_on() && self.s1191_table_needs_foot(table) {
                     self.s1191_foot_bw(table)
+                } else if std::env::var_os("OXI_S1581_DISABLE").is_none()
+                    && self.s1191_on() && self.s1191_table_needs_foot(table) {
+                    // S1581 (2026-09-27, default ON, opt-out OXI_S1581_DISABLE): a row
+                    // that ENDS a page fragment closes it with its own bottom rule,
+                    // which must fit too (`_pb_rowfoot_pdf_gen.py`: a row stays iff
+                    // its bottom boundary + half the rule width <= the body bottom,
+                    // boundaries measured at rule centres = the rule's lower edge in
+                    // Oxi's rule-top convention). technical__014819 p4 row 11: rule
+                    // top 704.25 + 15.5 + 0.5 = 720.25 > 720, Word sends it to p5.
+                    // Only cell-bordered tables: S870 pads a row from the rule ABOVE
+                    // it, so the row box never held its own bottom rule.
+                    self.table_fragment_bottom_width(table, Some(row))
                 } else { 0.0 }
             } else { 0.0 };
             let row_fit_height = row_fit_height + s1191_foot;
