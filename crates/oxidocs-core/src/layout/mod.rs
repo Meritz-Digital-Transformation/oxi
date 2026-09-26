@@ -41818,6 +41818,19 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                     .as_ref()
                     .and_then(|m| m.bottom)
                     .unwrap_or(default_pad_b);
+                // S1575 (2026-09-26, default ON, opt-out OXI_S1575_DISABLE): a cell's
+                // top/bottom margin is ROW-wide -- every cell of the row takes the
+                // row's largest. reference__009644b1: only the label cells carry tcMar
+                // 100/100; Word starts the content cell's first line on the label's
+                // baseline (PDF 256.13 both) and the 3-line row is 5 + 43.92 + 5,
+                // Oxi's content cell had no margin (43.9) and page 2 ran ~50pt short.
+                let (pad_t, pad_b) = if std::env::var_os("OXI_S1575_DISABLE").is_none() {
+                    let mt = row.cells.iter().map(|c| c.margins.as_ref().and_then(|m| m.top).unwrap_or(default_pad_t)).fold(pad_t, f32::max);
+                    let mb = row.cells.iter().map(|c| c.margins.as_ref().and_then(|m| m.bottom).unwrap_or(default_pad_b)).fold(pad_b, f32::max);
+                    (mt, mb)
+                } else { (pad_t, pad_b) };
+                #[allow(unused_mut)]
+                let mut pad_t = pad_t;
                 // S1065: accumulate the EFFECTIVE vertical cell margin (resolved
                 // direct-else-table-style top+bottom) for the binding-atLeast
                 // row floor. NOTE pad_t is mutated below by the ROWBOX2 border
@@ -43818,6 +43831,19 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                     .as_ref()
                     .and_then(|m| m.bottom)
                     .unwrap_or(default_pad_b);
+                // S1575 (2026-09-26, default ON, opt-out OXI_S1575_DISABLE): a cell's
+                // top/bottom margin is ROW-wide -- every cell of the row takes the
+                // row's largest. reference__009644b1: only the label cells carry tcMar
+                // 100/100; Word starts the content cell's first line on the label's
+                // baseline (PDF 256.13 both) and the 3-line row is 5 + 43.92 + 5,
+                // Oxi's content cell had no margin (43.9) and page 2 ran ~50pt short.
+                let (pad_t, pad_b) = if std::env::var_os("OXI_S1575_DISABLE").is_none() {
+                    let mt = row.cells.iter().map(|c| c.margins.as_ref().and_then(|m| m.top).unwrap_or(default_pad_t)).fold(pad_t, f32::max);
+                    let mb = row.cells.iter().map(|c| c.margins.as_ref().and_then(|m| m.bottom).unwrap_or(default_pad_b)).fold(pad_b, f32::max);
+                    (mt, mb)
+                } else { (pad_t, pad_b) };
+                #[allow(unused_mut)]
+                let mut pad_t = pad_t;
 
                 // S494b/S496 tblInd PER-CELL absorption (default-ON, opt-out OXI_S496_TBLIND_DISABLE): the
                 // leading-edge column cell (grid col 0) of a NON-nested tblInd table absorbs
@@ -56240,6 +56266,19 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                 .as_ref()
                 .and_then(|m| m.bottom)
                 .unwrap_or(default_pad_b);
+            // S1575 (2026-09-26, default ON, opt-out OXI_S1575_DISABLE): a cell's
+            // top/bottom margin is ROW-wide -- every cell of the row takes the
+            // row's largest. reference__009644b1: only the label cells carry tcMar
+            // 100/100; Word starts the content cell's first line on the label's
+            // baseline (PDF 256.13 both) and the 3-line row is 5 + 43.92 + 5,
+            // Oxi's content cell had no margin (43.9) and page 2 ran ~50pt short.
+            let (pad_t, pad_b) = if std::env::var_os("OXI_S1575_DISABLE").is_none() {
+                let mt = row.cells.iter().map(|c| c.margins.as_ref().and_then(|m| m.top).unwrap_or(default_pad_t)).fold(pad_t, f32::max);
+                let mb = row.cells.iter().map(|c| c.margins.as_ref().and_then(|m| m.bottom).unwrap_or(default_pad_b)).fold(pad_b, f32::max);
+                (mt, mb)
+            } else { (pad_t, pad_b) };
+            #[allow(unused_mut)]
+            let mut pad_t = pad_t;
             if include_border_padding && self.rowbox2_pad_on() {
                 // ROWBOX2: generalized Round30 (see the first-pass site).
                 pad_t += self.rowbox2_border_pad(table, cell);
