@@ -14681,9 +14681,19 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                             // measured the gap below a table; the page-bottom fit of
                             // the line that follows is a second question the rule
                             // does not answer yet. Re-derive with both before ON.
-                            if page.grid_char_pitch.is_some()
-                                && std::env::var_os("OXI_S1536").is_some()
-                            {
+                            // S1588 (2026-09-27): S1536 is back ON by default for EXPLICIT
+                            // compat 15 (the probe's mode; policies__1d77cba8 is compat 15 and
+                            // passes with it). The two documents that failed the 2026-09-25
+                            // gate are compat 14 (reference__0ea3ec86: Word adds ~0.2 after the
+                            // table, not the rule width) and compat 11 (technical__9e4d04b4:
+                            // the +0.5 pushed each following paragraph onto the next grid line,
+                            // 16pt by p4, where Word keeps it). Opt-out OXI_S1536_DISABLE;
+                            // OXI_S1536 still forces it on everywhere.
+                            let s1536_on = std::env::var_os("OXI_S1536").is_some()
+                                || (std::env::var_os("OXI_S1536_DISABLE").is_none()
+                                    && self.compat_mode >= 15
+                                    && self.compat_mode_explicit);
+                            if page.grid_char_pitch.is_some() && s1536_on {
                                 table.style.bottom_border.as_ref().map_or(
                                     table.style.border_width.unwrap_or(0.5),
                                     |d| {
