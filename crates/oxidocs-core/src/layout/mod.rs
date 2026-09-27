@@ -30949,6 +30949,54 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
         // read inside flush_word).
         let s1346_regime_credit: std::cell::Cell<i32> = std::cell::Cell::new(0);
         let word_full_punctuation_credit = std::cell::Cell::new(false);
+        // S1585 (2026-09-27, default ON, opt-out OXI_S1585_DISABLE): a JUSTIFIED
+        // CJK line squeezes its autoSpace gaps (and mid-line ideographic spaces)
+        // to keep its last unit. `_pb_cjk_jshrink_gen.py` (MS Mincho 10.5 +
+        // Century, compat 15, docGrid lines, 1-twip right-indent sweeps, left vs
+        // justified flips; Oxi's natural flips match Word within 0.1 in every arm):
+        //   CJK last unit, G gaps          1.3 / 2.0 / 2.6 / 2.9 / 3.1 (G 1/2/4/6/8)
+        //                                  = 1.5 x (fs/4) x G/(G+2)
+        //   Latin last word, 2 mid U+3000   5F 4.8, 5FG 7.3, 5FGH 7.9, ABCDEF 7.9
+        //                                  = min(0.25 x mid U+3000 + gaps,
+        //                                        max(gaps, 0.31 x (word + gap)))
+        //   Latin last word, no U+3000      1.3 whatever the word (= the gap term)
+        //   pure CJK                        0.0
+        // policies__1411889624's address line 「…西堀6番館ビル5F」 (natural 426.55,
+        // Word keeps it at 421.75) is the second row.
+        let s1585_on = std::env::var_os("OXI_S1585_DISABLE").is_none()
+            && self.doc_body_has_real_cjk
+            && is_justified
+            && s476_body
+            && !vertical
+            && grid_char_pitch.is_none()
+            && self.compat_mode >= 15
+            && self.compat_mode_explicit;
+        let s1585_counts = |chars: &[char]| -> (usize, usize) {
+            let solid = |c: char| kinsoku::is_cjk(c) && c != '\u{3000}';
+            let mut gaps = 0usize;
+            for w in chars.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                if (solid(a) && b.is_ascii_alphanumeric()) || (a.is_ascii_alphanumeric() && solid(b)) {
+                    gaps += 1;
+                }
+            }
+            let mut seen = false;
+            let mut mid_sp = 0usize;
+            let mut pending = 0usize;
+            for &c in chars {
+                if c == '\u{3000}' {
+                    if seen { pending += 1; }
+                } else if !c.is_whitespace() {
+                    seen = true;
+                    mid_sp += pending;
+                    pending = 0;
+                }
+            }
+            (gaps, mid_sp)
+        };
+        let s1585_gap_part = |g: usize, fs: f32| -> f32 {
+            if g == 0 { 0.0 } else { 1.5 * (fs / 4.0) * g as f32 / (g as f32 + 2.0) }
+        };
         let ideographic_closing_spacing = s476_body && is_justified && self.compress_punctuation
             && grid_char_pitch.is_none() && !vertical;
         let mut ideographic_closing_lines = std::collections::BTreeSet::new();
@@ -31009,11 +31057,24 @@ old_page={} chain_advance={:.1} chain_min_y={:.1} new_top={:.1} fresh_bottom={:.
                             0
                         }
                     };
+                    let s1346_credit_tw = s1346_credit_tw.max(if s1585_on
+                        && word.chars().all(|c| c.is_ascii_alphanumeric())
+                    {
+                        let fs = $style.font_size.unwrap_or(self.default_font_size);
+                        let line_chars: Vec<char> = current_line.fragments.iter().flat_map(|f| f.text.chars()).collect();
+                        let (g0, mid_sp) = s1585_counts(&line_chars);
+                        let gap_before = line_chars.last().map_or(false, |&c| kinsoku::is_cjk(c) && c != '\u{3000}');
+                        let g = g0 + gap_before as usize;
+                        let gap_part = s1585_gap_part(g, fs);
+                        let sp_cap = 0.25 * mid_sp as f32 * fs + gap_part;
+                        let last = 0.31 * (word_width + if gap_before { fs / 4.0 } else { 0.0 });
+                        pt_to_tw(sp_cap.min(gap_part.max(last)))
+                    } else { 0 });
                     if dbg_flush {
-                        eprintln!("[DBGFLUSH] word={:?} w_tw={} cur_tw={} curw_f={:.4} ww_f={:.4} avail={} spcred={} tabslack={} line_n={} just={} s799={}",
+                        eprintln!("[DBGFLUSH] word={:?} w_tw={} cur_tw={} curw_f={:.4} ww_f={:.4} avail={} spcred={} tabslack={} line_n={} just={} s799={} s1346+1585={} s1585_on={}",
                             word, pt_to_tw(word_width), current_width_tw, current_width, word_width, available_tw,
                             latin_space_credit_tw, right_tab_slack_tw, lines.len(),
-                            is_justified, s799_space_shrink);
+                            is_justified, s799_space_shrink, s1346_credit_tw, s1585_on);
                     }
                     let ws = word_style.take().unwrap_or_else(|| $style.clone());
                     let wft = word_field_type.take();
@@ -35458,6 +35519,13 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                     let mut overflow_tw = if vertical_natural_boundary {
                         current_width_tw + s1317_cw_tw - available_tw
                     } else { overflow_tw };
+                    // S1585: the CJK-unit arm (the gap term alone).
+                    if overflow_tw > 0 && s1585_on && kinsoku::is_cjk(ch) && ch != '\u{3000}' {
+                        let line_chars: Vec<char> = current_line.fragments.iter().flat_map(|f| f.text.chars()).collect();
+                        let (g0, _) = s1585_counts(&line_chars);
+                        let gap_before = line_chars.last().map_or(false, |c| c.is_ascii_alphanumeric());
+                        overflow_tw -= pt_to_tw(s1585_gap_part(g0 + gap_before as usize, font_size));
+                    }
                     // S1499 (2026-09-20, default ON, opt-out OXI_S1499_DISABLE): a
                     // compat-15 doNotCompress body line set jc=both absorbs a small
                     // overflow through its CJK<->Latin auto-space gaps. MEASURED on
