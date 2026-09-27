@@ -41738,6 +41738,8 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
         let mut s728_hdr_elems: Vec<LayoutElement> = Vec::new();
         let mut s728_hdr_h: f32 = 0.0;
         let mut s728_capture_done = false;
+        // S1587: the page (pages.len()) the first header row was captured on.
+        let mut s728_capture_page: Option<usize> = None;
         // S1083 (2026-08-06, default ON, opt-out OXI_S1083_DISABLE):
         // (row_idx, entry cursor) for the rows laid
         // out on the CURRENT page, so a page push can pull a keepNext row-chain
@@ -53952,7 +53954,38 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                 }
                 if row.header && row_idx == s728_hdr_rows_seen {
                     if let Some(slice) = elements.get(elements_before_row..) {
-                        s728_hdr_elems.extend(slice.iter().cloned());
+                        // S1587 (2026-09-27, default ON, opt-out OXI_S1587_DISABLE): a
+                        // header row captured on a LATER page than the rows before it
+                        // is stacked under them, so the replay keeps the rows in
+                        // order. reference__0096d8c9 p156: header rows 0-1 captured
+                        // on p155, row 2 pushed to p156 -- the replay aligned on
+                        // row 2's small y and drew rows 0-1 185pt down, under the
+                        // body (Word repeats all three at the top) and 57GD went to
+                        // p157.
+                        let s1587_page_moved = std::env::var_os("OXI_S1587_DISABLE").is_none()
+                            && !s728_hdr_elems.is_empty()
+                            && s728_capture_page.map_or(false, |p0| p0 != pages.len());
+                        if s1587_page_moved {
+                            let prev_bottom = s728_hdr_elems.iter().map(|e| e.y + e.height).fold(f32::NEG_INFINITY, f32::max);
+                            let slice_top = slice.iter().map(|e| e.y).fold(f32::INFINITY, f32::min);
+                            if prev_bottom.is_finite() && slice_top.is_finite() {
+                                let dy = prev_bottom - slice_top;
+                                for el in slice.iter() {
+                                    let mut c = el.clone();
+                                    c.y += dy;
+                                    if let LayoutContent::TableBorder { ref mut y1, ref mut y2, .. } = c.content {
+                                        *y1 += dy;
+                                        *y2 += dy;
+                                    }
+                                    s728_hdr_elems.push(c);
+                                }
+                            }
+                        } else {
+                            s728_hdr_elems.extend(slice.iter().cloned());
+                        }
+                        if s728_capture_page.is_none() {
+                            s728_capture_page = Some(pages.len());
+                        }
                         s728_hdr_h += row_height;
                         s728_hdr_rows_seen += 1;
                     } else {
@@ -57106,7 +57139,20 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
             let first_indent_raw = para
                 .style
                 .indent_first_line
-                .or_else(|| para.style.indent_first_line_chars.map(|c| Self::s1214_chars_pt(c, para, true, None, None)))
+                .or_else(|| para.style.indent_first_line_chars.map(|c| {
+                    // S1586 (2026-09-27, default ON, opt-out OXI_S1586_DISABLE): the
+                    // estimate prices firstLineChars on the same grid cell as the
+                    // render (its indent_r / indent_l already take the grid).
+                    // technical__9e4d04b4 (linesAndChars charSpace=-3531, cell 61pt,
+                    // firstLineChars=300 = 28.9pt on the 9.63 pitch): the estimate
+                    // used 3 x 10.5 = 31.5, wrapped 「mAs」 to a second line and made
+                    // the row 76.75 against Word's 73.32 (the render was right).
+                    if std::env::var_os("OXI_S1586_DISABLE").is_none() {
+                        Self::s1214_chars_pt(c, para, true, grid_char_pitch, grid_char_cw_ratio)
+                    } else {
+                        Self::s1214_chars_pt(c, para, true, None, None)
+                    }
+                }))
                 .unwrap_or(0.0);
             // COM-confirmed (2026-04-25): numbered list + hanging + suff=tab/default
             // => marker consumes hanging, text starts at `left`. See body path.
