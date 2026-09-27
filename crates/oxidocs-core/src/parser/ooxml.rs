@@ -14148,6 +14148,18 @@ fn resolve_alias_blocks(
                 if let Some(rs) = p.style.ppr_rpr.as_mut() {
                     resolve_alias_run_style(rs, alias);
                 }
+                // S1589 (2026-09-27, default ON, opt-out OXI_S1589_DISABLE): the
+                // numbering marker takes the fontTable altName substitution too.
+                // reports__00870bdf table 9: the level's rPr says 'Myriad Pro'
+                // (altName Corbel, not installed); Word draws 'A.'/'B.' in Corbel
+                // Bold 10 (9.50 / 9.14 = the TTF advances), Oxi at the 8.0
+                // unknown-face fallback, so 'B.' ended short of the hanging stop
+                // (S893 never fired) and 'Private Sector' kept one line.
+                if std::env::var_os("OXI_S1589_DISABLE").is_none() {
+                    if let Some(rs) = p.style.list_marker_style.as_mut() {
+                        resolve_alias_run_style(rs, alias);
+                    }
+                }
                 for sh in &mut p.shapes {
                     resolve_alias_blocks(&mut sh.text_blocks, alias);
                 }

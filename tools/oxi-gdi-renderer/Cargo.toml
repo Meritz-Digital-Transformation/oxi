@@ -18,3 +18,19 @@ windows = { version = "0.58", features = [
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+# Investigation builds (instrumented probes, A/B of a single doc): incremental,
+# low optimisation. Layout numbers are identical to release (no fast-math in
+# Rust); gates and snapshots still use --release.
+[profile.fast]
+inherits = "release"
+opt-level = 1
+incremental = true
+codegen-units = 256
+
+# Instrumented single-document probes only (slow binary, fastest rebuild).
+[profile.probe]
+inherits = "dev"
+opt-level = 0
+incremental = true
+debug = false

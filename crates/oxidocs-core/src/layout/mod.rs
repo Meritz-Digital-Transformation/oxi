@@ -45717,6 +45717,8 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                                                     p_indent_left,
                                                     para.style.list_indent.unwrap_or(18.0),
                                                     *w,
+                                                    (-p_first_line_indent_raw).max(0.0),
+                                                    self.s1590_exact_marker_w(para),
                                                 )
                                             })
                                             .unwrap_or(0.0)
@@ -55797,7 +55799,27 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
     /// used to widen line 0's wrap budget and shift its text left.
     /// Scoped to the CELL paths (evidence = cell lists; the body list path
     /// keeps its COM-confirmed "text starts at left" model as a follow-up).
-    fn s718_list_tab_pull(&self, indent_l: f32, list_indent: f32, marker_w: f32) -> f32 {
+    /// S1590: the marker's UNROUNDED advance (design width x size). The shared
+    /// width helper rounds Latin advances to 10tw, which is how Word sets the
+    /// monospaced CJK faces but not a Latin number: reports__00870bdf's Corbel
+    /// Bold 'B.' is 9.155 in Word's PDF and 9.0 rounded.
+    fn s1590_exact_marker_w(&self, para: &Paragraph) -> f32 {
+        let Some(marker) = para.style.list_marker.as_ref() else { return 0.0; };
+        let marker_style = s1037_marker_style(para).cloned().unwrap_or_else(|| {
+            para.runs.first().map(|r| r.style.clone()).unwrap_or_default()
+        });
+        let fs = self.resolve_font_size(&marker_style, &para.style);
+        let m = self.metrics_for(&marker_style, &para.style);
+        marker.chars().map(|c| {
+            if m.char_widths.contains_key(&c) && m.synthetic_bold_advance <= 0.0 {
+                m.char_width_em(c) * fs
+            } else {
+                self.registry.char_width_pt_with_fallback(c, fs, m)
+            }
+        }).sum()
+    }
+
+    fn s718_list_tab_pull(&self, indent_l: f32, list_indent: f32, marker_w: f32, hanging: f32, marker_w_exact: f32) -> f32 {
         if std::env::var("OXI_S718_DISABLE").is_ok() {
             return 0.0;
         }
@@ -55809,6 +55831,23 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
         let stop = (marker_end / dts + 1e-4).floor() * dts + dts;
         if stop + 0.05 < indent_l {
             indent_l - stop
+        } else if hanging > 0.01
+            && marker_w_exact > hanging + 0.01
+            && !self.doc_body_has_real_cjk
+            && std::env::var_os("OXI_S1590_DISABLE").is_none()
+        {
+            // The marker sits at indent_l - hanging (the paragraph's own hanging,
+            // not the level's list_indent): technical__0043bfe0's cell items
+            // (left 0, level hanging 25.85, marker 6.5) do not overshoot.
+            // S1590 (2026-09-27, default ON, opt-out OXI_S1590_DISABLE): the cell
+            // counterpart of the body's S893 -- a marker that runs past the
+            // hanging stop tabs the text to the next default stop (a NEGATIVE
+            // pull: line 0 starts later and is narrower). reports__00870bdf
+            // table 9: 'B.' in Corbel Bold 10 = 9.155 > hanging 9.0 -> Word's
+            // text at the 36pt default stop, 'Sector' on line 2.
+            let end = indent_l - hanging + marker_w_exact;
+            let stop = (end / dts + 1e-4).floor() * dts + dts;
+            -(stop - indent_l).max(0.0)
         } else {
             0.0
         }
@@ -57231,6 +57270,8 @@ indent_l={:.2} fli={:.2} stops={} | {:?}",
                             indent_l,
                             para.style.list_indent.unwrap_or(18.0),
                             mk_w,
+                            (-first_indent_raw).max(0.0),
+                            self.s1590_exact_marker_w(para),
                         )
                 } else {
                     first_line_wrap_w
